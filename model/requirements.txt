@@ -1,0 +1,8 @@
+# TODO: define the Python environment for the MNIST export workflow.
+# Required by README.md Section 9.1 and Section 11.1.
+# Include the libraries needed for training/exporting the compact model and generating .mem files.
+
+numpy
+torch
+torchvision
+# Add any additional utilities used for export, serialization, or validation.

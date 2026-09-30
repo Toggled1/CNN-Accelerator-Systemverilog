@@ -1,0 +1,32 @@
+name: mnist-rtl-sim-ci
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r model/requirements.txt
+
+      - name: Run Python export step
+        run: python3 model/train_and_export.py
+
+      - name: Compile and run RTL simulation
+        run: |
+          cd sim
+          make compile
+          make run
+
+      - name: Show test summary
+        run: echo "TODO: confirm CI passes after simulation and golden output checks are implemented."

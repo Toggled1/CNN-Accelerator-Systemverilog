@@ -1,0 +1,3 @@
+# TODO: populate this file with expected digit labels for the validation images.
+# This file should be used by tb_top.sv to verify the hardware output.
+# Keep the ordering aligned exactly with input_images.mem.

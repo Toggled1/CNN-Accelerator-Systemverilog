@@ -1,0 +1,5 @@
+# TODO: define the GTKWave configuration for signal debugging.
+# This file should be aligned with the signal names used by the final RTL implementation.
+# Include the key nets for: clk, rst_n, start, done, predicted_digit, and major MAC/dense signals.
+
+# TODO: add GTKWave signal declarations after implementation.

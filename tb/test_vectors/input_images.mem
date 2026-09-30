@@ -1,0 +1,3 @@
+# TODO: populate this file with MNIST validation images in the format described in README.md.
+# Each image should be flattened in row-major order and represented as hex values.
+# Keep the input ordering consistent with the golden output vector.
