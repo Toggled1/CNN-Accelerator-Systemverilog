@@ -11,13 +11,10 @@ module pooling_layer (
     output logic signed [19:0] pooled_value
 );
 
-    // Final repo protocol:
-    // - this is a streaming CNN stage
-    // - the pool_block[0:3] array is a local 2x2 neighborhood buffer, not a full-tensor input
-    // - values may be filled over time as the stream advances across the feature map
-    // - once the block is complete, max pooling emits one value and asserts valid_out
-    // - only then is the next 2x2 region processed
+    // pool_block is one complete same-channel region ordered TL, TR, BL, BR.
+    // Blocks arrive in pooled-row, pooled-column, channel order. On an enabled
+    // valid input, register the signed maximum and assert valid_out next cycle.
     // TODO: implement 2x2 max pooling for each feature map cell.
-    // TODO: keep the output ordering consistent with conv_layer_2 input expectations.
+    // TODO: preserve the location-major, channel-contiguous output order.
 
 endmodule

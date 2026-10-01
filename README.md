@@ -198,6 +198,10 @@ Recommended configuration:
 - pool size: 2 x 2
 - stride: 2
 - output size: 13 x 13 x 4
+- pooling is independent for each of the four channels; values from different channels are never compared
+- each complete block is ordered top-left, top-right, bottom-left, bottom-right
+- blocks are processed by pooled row, pooled column, then channel, so the four channel outputs for one pooled coordinate are consecutive
+- the upstream stage assembles each complete block; `pooling_layer` accepts a full block in one transfer and returns one scalar
 
 ### 6.4 Convolutional layer 2
 
@@ -286,7 +290,7 @@ The project chooses the following single, consistent protocol:
 - `line_buffer` assembles a 3x3 receptive field from the stream and emits one `window_valid` pulse when the window is ready
 - each convolution stage consumes one complete receptive field and emits one valid output activation per filter or per output location
 - ReLU is applied per activation sample, one value at a time
-- pooling is performed on a 2x2 local neighborhood assembled from the stream and emits one pooled value when the block is complete
+- an upstream producer assembles each complete same-channel 2x2 pooling block; pooling accepts one block and emits one scalar per transfer
 - the dense stage consumes flattened values in sequence and computes the logits
 
 This is the final protocol contract for the repository. Array-based local buffers like `window[0:8]` and `pool_block[0:3]` are storage for a local neighborhood, not evidence that the whole tensor is transferred in one cycle.
@@ -306,13 +310,40 @@ This is a single-value operation and does not require a multi-sample neighborhoo
 
 #### Pooling stage semantics
 
-Pooling is a neighborhood operation. For a 2x2 max-pool block:
+Pooling compares the four signed Q6.14 values in one complete, same-channel 2x2 block. The block order is:
 
 ```text
-output = max(block[0], block[1], block[2], block[3])
+pool_block[0] = top-left
+pool_block[1] = top-right
+pool_block[2] = bottom-left
+pool_block[3] = bottom-right
 ```
 
-The 2x2 block is assembled from four neighboring activations. Once all four values are present, the max is computed and one pooled output is emitted. This is the only stage in the pipeline that operates over a local 2x2 neighborhood instead of a single scalar value.
+For pooled output coordinate `(pr, pc)` and channel `ch`, where `pr` and `pc` range from 0 through 12 and `ch` ranges from 0 through 3:
+
+```text
+pool_block[0] = relu1[2*pr    ][2*pc    ][ch]
+pool_block[1] = relu1[2*pr    ][2*pc + 1][ch]
+pool_block[2] = relu1[2*pr + 1][2*pc    ][ch]
+pool_block[3] = relu1[2*pr + 1][2*pc + 1][ch]
+```
+
+The output is:
+
+```text
+pooled_value = max(pool_block[0], pool_block[1], pool_block[2], pool_block[3])
+```
+
+The upstream producer presents one complete block per `valid_in` transfer. On a rising edge where `rst_n`, `enable`, and `valid_in` are all high, `pooling_layer` accepts the block, registers the signed maximum, and asserts `valid_out` for the following cycle. The maximum is compared as signed Q6.14 and passed through unchanged. There are 13 x 13 x 4 = 676 accepted blocks and scalar outputs per image. Process them in this order:
+
+```text
+for pr = 0..12:
+        for pc = 0..12:
+                for ch = 0..3:
+                        accept the 2x2 block for (pr, pc, ch)
+```
+
+Thus every group of four consecutive `pooled_value` transfers corresponds to channels 0..3 at one pooled `(pr, pc)` coordinate. This is the location-major, channel-contiguous order used to build Conv2's four-channel input map. Since 26 is even and the stride is 2, the 13 x 13 output uses every input position exactly once; no padding or partial block is needed.
 
 ### 7.3 Local array interpretation in RTL
 
@@ -322,7 +353,7 @@ The following array conventions are used in the RTL skeleton for clarity and con
 - `pool_block[0:3]` means a 2x2 local pooling block buffer
 - these arrays are local working structures, not evidence that the entire tensor is passed as a single monolithic object in one cycle
 
-In other words, the stage still belongs to a streaming design, but it holds a small local neighborhood in temporary storage while computing one output value.
+For pooling, `pool_block` contains a complete same-channel neighborhood when presented to the module. The upstream producer assembles the four values; the pooling module does not gather four scalar transfers internally. It returns one pooled value for that block.
 
 ### 7.4 Interface contract for the actual implementation
 
@@ -335,7 +366,7 @@ FSM order: `IDLE -> LOAD_IMAGE -> CONV1 -> RELU1 -> POOL -> CONV2 -> RELU2 -> FL
 3. The line buffer assembles a valid 3x3 neighborhood for the convolution stage.
 4. Conv1 produces 4 output feature maps.
 5. ReLU1 is applied to each Conv1 activation value.
-6. The pool stage assembles a 2x2 region and emits one max-pooled value.
+6. The upstream pool-block producer assembles each same-channel 2x2 region in top-left, top-right, bottom-left, bottom-right order; the pool stage emits its maximum. Blocks are ordered by pooled row, pooled column, then channel.
 7. Conv2 consumes the pooled feature map values and produces 8 output channels.
 8. ReLU2 is applied to each Conv2 activation value.
 9. Flatten generates the 968-element vector.
@@ -690,7 +721,11 @@ Required behavior:
 
 - apply 2x2 max pooling with stride 2
 - reduce 26x26x4 to 13x13x4
-- preserve the strongest activation in each pooling region
+- accept one complete 2x2 block for one channel at a time, ordered top-left, top-right, bottom-left, bottom-right
+- compare the four signed Q6.14 inputs and register their maximum without changing its value or scale
+- accept a block on a rising edge when `rst_n`, `enable`, and `valid_in` are high, then assert `valid_out` with `pooled_value` in the following cycle
+- process blocks in pooled-row, pooled-column, channel order; the upstream producer supplies coordinates implicitly through this order and assembles the block before asserting `valid_in`
+- produce exactly 676 scalar values per image; each consecutive group of four is channels 0..3 at one pooled coordinate
 
 ### 9.8 `rtl/relu.sv`
 

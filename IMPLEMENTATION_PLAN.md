@@ -57,9 +57,9 @@ Implementation must keep the explicit sample-to-weight index mapping and latency
 
 ### 3.3 Pooling assembly and ordering
 
-The README fixes 2 x 2 max-pooling with stride 2, applied independently to each of four channels, but describes both a neighborhood array and values assembled over time. Current `pooling_layer.sv` accepts four signed 20-bit values at once and returns one scalar; it has no channel or coordinate inputs.
+Status: resolved in `README.md` Sections 6.3, 7.2, 7.3, 7.4, and 9.7. The upstream producer supplies one complete same-channel 2 x 2 block in a single valid transfer. `pool_block[0:3]` order is top-left, top-right, bottom-left, bottom-right, mapped from input coordinate `(2*pr + dy, 2*pc + dx, ch)`. The pooling module compares the signed Q6.14 inputs, registers the unchanged maximum, and asserts `valid_out` for the following cycle. Blocks are ordered by pooled row, pooled column, then channel, yielding 676 scalar outputs per image; each consecutive group of four contains channels 0..3 at one pooled coordinate. The upstream producer assembles the four spatial values and supplies coordinates implicitly through this order. Since 26 is even and stride is 2, every input location belongs to exactly one pool block.
 
-Document the exact order of the four elements (top-left, top-right, bottom-left, bottom-right), when a block is considered complete, how odd/even row and column positions map to non-overlapping stride-2 blocks, and how the four channels are sequenced. Define whether a complete block is presented in one cycle or assembled over multiple valid cycles. The output ordering must allow Conv2 to reconstruct the pooled 13 x 13 x 4 tensor without guessing.
+Implementation must preserve this block mapping, order, and latency. Stage 3.4 still defines how this local `enable`/`valid_in` behavior integrates with the complete pipeline handshake and any stalls.
 
 ### 3.4 Streaming and control protocol
 
