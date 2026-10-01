@@ -71,7 +71,7 @@ Implementation must follow the README buffer capacities, payload granularity, ou
 
 ### 3.5 Flatten ordering and buffering
 
-Status: the implementation choice is resolved in `README.md` Sections 7.1.6 and 7.4. Flatten accepts one eight-channel vector for each of 121 spatial locations, stores/reorders all 968 values into the required channel-major, row-major, column-major vector, then asserts `valid_out` once the complete vector is available. The output is the existing 968-element array payload; Dense consumes it sequentially by flat index. The Python model/export order and Dense weight order must use this exact layout.
+Status: the implementation choice is resolved in `README.md` Sections 7.1.6, 7.4, and 9.9. Flatten accepts one eight-channel vector for each spatial location in row-major order. For input location `(r,c)` and channel `ch`, it writes `feature_data[ch]` to `flattened_vector[ch * 121 + r * 11 + c]`. After 121 accepted vectors, it asserts `valid_out` for one cycle with the complete 968-element channel-major array. That vector remains stable throughout Dense, which consumes it sequentially by flat index. The Python model/export order and Dense weight order must use the same formula.
 
 Implementation work remains in Phase 4: add an index-coded tensor test that checks every location/channel mapping, channel boundaries, first and last flat values, and full-vector completion. Keep the full vector stable until Dense has consumed all 968 entries.
 

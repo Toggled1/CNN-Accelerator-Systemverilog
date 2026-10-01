@@ -378,7 +378,7 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 | ReLU1 map to pool block / Pool | Rising edge with pooling `valid_in && enable`. | One complete same-channel four-value block; pooling emits one scalar with `valid_out`, 676 scalars total. |
 | Pooled map to Conv2 | On entry to `CONV2`, reset the window-source row/column counters to zero. Assert internal `conv2_window_valid` for each complete window; Conv2 accepts on `conv2_window_valid && enable_conv2`. | One signed Q6.14 window of 36 values; Conv2 emits eight signed Q6.14 values with `valid_out`, 121 vectors total. |
 | Conv2 map to ReLU2 | One location vector per cycle during `RELU2`; no registered handshake. | Eight signed Q6.14 values per location; all eight are ReLU-processed in parallel and written back in place. |
-| Conv2 map to Flatten | Rising edge with Flatten `valid_in` during `FLATTEN`. | One eight-channel location vector; after 121 accepted vectors, `valid_out` pulses once for the complete 968-value `flattened_vector`. |
+| Conv2 map to Flatten | Rising edge with Flatten `valid_in` during `FLATTEN`; spatial vectors arrive row-major. | `feature_data[ch]` for the current `(r,c)` is stored at `flattened_vector[ch * 121 + r * 11 + c]`. After 121 accepted vectors, `valid_out` pulses once for the complete 968-value array, which remains stable through `DENSE`. |
 | Flatten vector to Dense | Pulse `start_dense` on the first `DENSE` cycle while `feature_valid` is low; then assert `feature_valid` once for each flat index 0..967. | One signed Q6.14 feature per valid cycle. Dense asserts `dense_done` once all ten logits are final. |
 | Dense logits to Argmax/top | `dense_done` qualifies the completed logits; Argmax is combinational. | Ten signed Q6.14 logits; the top-level captures the selected 4-bit digit and asserts `done` in `DONE`. |
 
@@ -396,7 +396,7 @@ FSM order: `IDLE -> LOAD_IMAGE -> CONV1 -> RELU1 -> POOL -> CONV2 -> RELU2 -> FL
 | `POOL` | Assemble one same-channel block in TL, TR, BL, BR order; process by pooled row, pooled column, then channel. | 676 signed Q6.14 values (13 x 13 x 4), stored location-major with channels 0..3 consecutive. |
 | `CONV2` | Reset the window-source row/column counters to zero, then read the pooled map and form complete 36-value windows using the mapping in Section 7.1.3. Conv2 accepts 121 windows in row-major output-location order. | 121 locations, each with eight pre-ReLU Q6.14 values. |
 | `RELU2` | Apply ReLU to each of the eight values at every Conv2 location and replace the values in the Conv2 buffer. | 121 eight-channel locations, 968 values. |
-| `FLATTEN` | Read the 121 eight-channel locations and reorder into channel-major, row-major, column-major order. | One complete 968-value signed Q6.14 vector and one completion pulse. |
+| `FLATTEN` | Read the 121 eight-channel locations in row-major spatial order and store channel `ch` at `ch * 121 + r * 11 + c`. | One complete 968-value signed Q6.14 vector and one completion pulse after the 121st accepted input vector. |
 | `DENSE` | Pulse `start_dense` on entry, then present flat indices 0..967 sequentially with `feature_valid`. Dense handles parameter access and accumulates all ten class scores. | Ten final signed Q6.14 logits and one `dense_done` pulse. |
 | `DONE` | Evaluate/capture argmax result from the completed logits. | One-cycle `done` pulse and stable `predicted_digit`. |
 
@@ -566,7 +566,16 @@ for each output channel ch in 0..7:
       flattened_vector.push(conv2_out[ch][r][c])
 ```
 
-This corresponds to a channel-major, row-major, column-major layout.
+The input to `flatten_layer` arrives as one location vector per valid transfer, in row-major spatial order. `feature_data[ch]` is the Conv2/ReLU2 value for channel `ch` at the current location `(r, c)`. The exact destination index is:
+
+```text
+spatial_index = r * 11 + c
+flat_index = ch * 121 + spatial_index
+                                                = ch * 121 + r * 11 + c
+flattened_vector[flat_index] = feature_data[ch]
+```
+
+Thus input location vectors arrive in location-major order, while the output array is channel-major, row-major, column-major. The Flatten module stores/reorders all 121 input vectors. It accepts a vector on each rising edge with `valid_in` high during `FLATTEN`; invalid cycles do not advance its location count. After accepting the 121st vector, it asserts `valid_out` for one cycle with the complete 968-value array. The array remains stable throughout `DENSE` and is then reusable for the next inference. Boundary indices are `flat[0] = feature_data[0]` at `(r,c)=(0,0)`, `flat[120]` at channel 0 location `(10,10)`, `flat[121]` at channel 1 location `(0,0)`, and `flat[967]` at channel 7 location `(10,10)`.
 
 ### 7.1.7 Handshake and stage sequencing
 
@@ -781,7 +790,10 @@ Required behavior:
 
 - serialize the final convolution output in a defined order
 - maintain deterministic ordering between software export and hardware flattening
-- accept one eight-channel Conv2 vector per spatial location during `FLATTEN`; after all 121 locations, assert `valid_out` for one cycle and expose the complete 968-value channel-major vector
+- accept one eight-channel Conv2 vector per spatial location in row-major location order during `FLATTEN`
+- write `feature_data[ch]` for location `(r,c)` to `flattened_vector[ch * 121 + r * 11 + c]`
+- advance the input location count only on a rising edge with `valid_in` high; after 121 accepted vectors, assert `valid_out` for one cycle and expose the complete 968-value channel-major vector
+- hold the completed vector stable throughout `DENSE`; reset clears the input count and `valid_out`
 
 ---
 
