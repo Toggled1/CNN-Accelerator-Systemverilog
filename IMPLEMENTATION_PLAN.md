@@ -53,13 +53,13 @@ Implementation work must follow the exact quantization and conversion rules in R
 
 Status: resolved in `README.md` Sections 6.4, 7.1.3, and 9.6. `conv_layer_2.sv` accepts `window[0:35]` of signed Q6.14 samples and `filter_weights[0:7][0:35]` of signed Q1.7 weights. For each sample, `index = ch * 9 + ky * 3 + kx`, so channel is the outer ordering, followed by kernel row and column. Each accepted window is one complete 3 x 3 neighborhood across all four channels. The module registers all eight saturated Q6.14 pre-ReLU results and asserts `valid_out` for the following cycle. The image contains 121 such windows, presented in row-major output-location order. This preserves the README's 4 input channels, 8 output filters, 36 weights per filter, and total parameter count.
 
-Implementation must keep the explicit sample-to-weight index mapping and latency. Stage 3.3 still defines how pooling emits values and how the upstream window generator gathers those values into the 36-sample payload; Stage 3.4 still defines the complete pipeline handshake and stall behavior.
+Implementation must keep the explicit sample-to-weight index mapping and latency. Stage 3.3 defines the pooled-value order; Stage 3.4 defines the sequential no-backpressure controller and buffer behavior that feed the Conv2 window generator.
 
 ### 3.3 Pooling assembly and ordering
 
 Status: resolved in `README.md` Sections 6.3, 7.2, 7.3, 7.4, and 9.7. The upstream producer supplies one complete same-channel 2 x 2 block in a single valid transfer. `pool_block[0:3]` order is top-left, top-right, bottom-left, bottom-right, mapped from input coordinate `(2*pr + dy, 2*pc + dx, ch)`. The pooling module compares the signed Q6.14 inputs, registers the unchanged maximum, and asserts `valid_out` for the following cycle. Blocks are ordered by pooled row, pooled column, then channel, yielding 676 scalar outputs per image; each consecutive group of four contains channels 0..3 at one pooled coordinate. The upstream producer assembles the four spatial values and supplies coordinates implicitly through this order. Since 26 is even and stride is 2, every input location belongs to exactly one pool block.
 
-Implementation must preserve this block mapping, order, and latency. Stage 3.4 still defines how this local `enable`/`valid_in` behavior integrates with the complete pipeline handshake and any stalls.
+Implementation must preserve this block mapping, order, and latency. Stage 3.4 defines how this local `enable`/`valid_in` behavior integrates with the sequential FSM; there is no downstream stall or ready signal.
 
 ### 3.4 Streaming and control protocol
 
@@ -83,12 +83,9 @@ The files contain 36 signed 8-bit Conv1 weights, 288 signed 8-bit Conv2 weights,
 
 ### 3.7 Golden outputs and reproducibility
 
-The README says the testbench compares predictions with expected digit labels, but it does not say whether `golden_outputs.mem` contains dataset labels or predictions from the quantized Python model. These validate different things. Define both clearly:
+Status: resolved in `README.md` Sections 9.1, 9.13, 10.3, 11, and 12. `golden_outputs.mem` stores the quantized integer reference's predicted class index, while the new `labels.mem` stores MNIST ground-truth labels. The testbench compares each RTL prediction exactly to the reference prediction, then separately counts correctness against labels. It reports both reference agreement and top-1 accuracy; accuracy has no pass/fail threshold. Dense unit tests compare all ten logits exactly.
 
-- RTL-versus-Python equivalence should compare the quantized reference's logits and/or predicted index with the RTL result for the exact same exported model and input.
-- Classification accuracy should compare predictions with MNIST ground-truth labels and should have a documented validation subset and reporting rule.
-
-Specify which file holds which values, deterministic sample selection, random seeds, model/training policy, and whether CI requires downloading MNIST or uses checked-in deterministic vectors. A classification label alone is not a substitute for bit-accurate equivalence.
+Fixtures contain 100 official MNIST test examples: the first ten examples of each class, selected in canonical test-set order and stored class-major. Regeneration trains on the official 60,000-image training split with the fixed README CPU/seed/training policy, then regenerates parameters, inputs, integer-reference predictions, and labels together. CI uses the committed fixture set and never trains or downloads MNIST. Implementation and test work remains in Phases 3, 4, 6, and 7.
 
 ### 3.8 Tie behavior and invalid cases
 
@@ -134,9 +131,9 @@ Exit criteria: shapes are exact, reruns with the same seed/persisted checkpoint 
 
 1. Implement `model/export_utils.py` with dedicated, tested serializers for signed 8-bit weights, the selected bias/activation/score widths, raw unsigned image bytes, and digit values. Encode negative two's-complement values to exactly the documented number of hex digits. Reject out-of-range values instead of silently truncating unless truncation is the explicitly frozen rule.
 2. Serialize each parameter array using the exact README per-file index/order contract: Conv1 filter then kernel row/column; Conv2 output filter then input channel then kernel row/column; Dense class then input index; biases in Conv1, Conv2, Dense order. Emit exactly one scalar per line, with two hex digits for weights and five for biases.
-3. Implement the exporter to produce the four parameter files plus input images and the explicitly defined golden/reference files. Never leave comments or placeholder strings in a file intended for `$readmemh`.
-4. Set and document deterministic sample selection. Keep a small, bounded simulation subset suitable for CI; keep model training/download separate from ordinary RTL regression where possible. If CI is required to train, ensure dataset availability and runtime are reliable, or change the README/CI to use deterministic checked-in test artifacts.
-5. Validate generated data before writing: expected element counts (36, 288, 9,680 weights; 4, 8, 10 biases), legal ranges, exact image count x 784, labels in 0..9, and alignment between images, reference outputs, and labels.
+3. Implement the exporter to produce the four parameter files, `input_images.mem`, reference-prediction `golden_outputs.mem`, and ground-truth `labels.mem` as one fixture set. Never leave comments or placeholder strings in a file intended for `$readmemh`.
+4. Select exactly the first ten examples of each class from the canonical MNIST test split, preserving their original order within each class and writing classes in digit order. Train using the CPU/seed/5-epoch policy fixed in README Section 10.3. Regeneration is explicit; routine simulation and CI never train or download MNIST.
+5. Validate generated data before writing: expected parameter counts (36, 288, 9,680 weights; 4, 8, 10 biases), legal ranges, exactly 100 images of 784 pixels, exactly 100 reference predictions and labels in 0..9, and identical sample ordering across the three validation files.
 6. Write files atomically or fail without leaving partially overwritten fixtures. Print concise counts and paths so CI logs can diagnose export failures.
 7. Add Python tests for serializer round trips, signed boundary encodings, ordering with index-coded arrays, counts, and malformed/range-invalid inputs.
 
@@ -246,11 +243,11 @@ Exit criteria: a directed image traverses each sequential FSM phase with exact t
 Implement `tb/tb_top.sv` after the top-level interface is stable.
 
 1. Generate clock and active-low reset; initialize all testbench signals before releasing reset.
-2. Load the generated input, model parameter, Python reference, and label files from paths that work with `make -C sim run`.
+2. Load the committed/generated input, model-parameter, reference-prediction, and ground-truth-label files from paths that work with `make -C sim run`.
 3. For each selected image, start one inference and send each of 784 unsigned pixels in row-major order according to `pixel_valid`/`ready`. Hold a pixel and valid asserted until accepted if the frozen handshake requires it.
 4. Apply a configurable timeout per inference and fail if `done` is absent, early, repeated, or accompanied by an invalid prediction.
-5. Compare RTL logits and/or predictions to quantized Python golden outputs as explicitly chosen in Phase 0. Separately report classification accuracy against true dataset labels; do not confuse reference equivalence with accuracy.
-6. Report sample count, exact-equivalence pass/fail, number correct against labels, and accuracy. Ensure any mismatch causes `$fatal` or a nonzero simulator exit so Make and CI fail.
+5. Compare every RTL predicted digit exactly against the integer-reference index in `golden_outputs.mem`. Separately score it against `labels.mem`; do not confuse reference agreement with classification accuracy. Focused Dense tests compare all ten logits against the integer reference.
+6. Report sample count, reference match count, number correct against labels, and accuracy. Any mismatch against reference predictions causes `$fatal` or a nonzero simulator exit so Make and CI fail; accuracy is reported without a minimum threshold.
 7. Run multiple images in one simulator session to verify reset/clear/restart behavior and prove there is no cross-image state leakage.
 
 Exit criteria: directed arithmetic tests, exported fixture checks, and end-to-end equivalence all pass; validation accuracy is reported according to the README criterion.
@@ -261,9 +258,9 @@ Exit criteria: directed arithmetic tests, exported fixture checks, and end-to-en
 2. Make `sim/run_sim.sh` a reliable wrapper around compile and run. Verify invocation from the repository root and another directory.
 3. Add `$dumpfile`/`$dumpvars` behind a documented testbench or simulator option so normal simulation does not produce unnecessary repository artifacts.
 4. Populate `sim/wave_config.gtkw` only after final signal names are known. Include clock/reset, top pixel valid/ready, FSM state and stage enables, internal valid/enable signals, coordinate/counter state, representative MAC accumulator/weight data, dense completion/logits, and final prediction.
-5. Update `.github/workflows/ci.yml` so a clean checkout installs only necessary dependencies, runs Python unit/export checks, compiles the RTL, and runs deterministic simulation. Keep the CI job bounded and make each failure propagate to the workflow.
+5. Update `.github/workflows/ci.yml` so a clean checkout installs Icarus, compiles the RTL, and runs simulation against committed deterministic fixtures. It may run lightweight offline Python fixture checks, but it must not train or download MNIST. Keep the CI job bounded and make each failure propagate to the workflow.
 6. Avoid dependence on an interactive GTKWave session in CI. GTKWave remains a local debug target; the waveform file should be optional.
-7. If CI calls training or downloads MNIST, verify the action is deterministic and reliable under GitHub-hosted runner network/runtime limits. Prefer validating checked-in or generated deterministic fixtures unless the README explicitly requires live dataset acquisition in CI.
+7. Keep training and fixture regeneration out of CI. CI consumes the committed parameter, image, reference-prediction, and label files so it is deterministic and does not depend on MNIST downloads.
 
 Exit criteria: the same documented command sequence works locally; GitHub Actions performs compile and self-checking simulation on a clean checkout and fails on intentional errors.
 

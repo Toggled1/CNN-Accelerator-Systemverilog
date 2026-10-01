@@ -1,11 +1,12 @@
 // TODO: implement the self-checking simulation testbench from README.md Section 9.10.
 // Required behavior:
 // - initialize clock and reset
-// - load input_images.mem and golden_outputs.mem
+// - load input_images.mem, golden_outputs.mem, and labels.mem
 // - stream one MNIST image into the design
 // - wait until done is asserted
-// - compare predicted_digit against the expected label
-// - print pass/fail and final accuracy summary
+// - compare predicted_digit exactly against the integer-reference prediction
+// - separately compare predicted_digit against the MNIST ground-truth label
+// - report reference agreement and classification accuracy separately
 // - finish simulation with $finish;
 
 module tb_top;
@@ -22,8 +23,8 @@ module tb_top;
     // TODO: instantiate top_classifier.
     // TODO: generate a 100 MHz clock or the required testbench clock frequency.
     // TODO: implement reset and input vector loading logic.
-    // TODO: compare output against golden_outputs.mem.
-    // TODO: print final accuracy summary after all validation samples.
+    // TODO: compare output against reference predictions and labels separately.
+    // TODO: report exact-reference agreement and classification accuracy.
 
     initial begin
         // TODO: initialize simulation state.
