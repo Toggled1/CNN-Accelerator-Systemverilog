@@ -37,7 +37,7 @@ The intended architecture, as fixed by the README, is:
 | Dense | 968 | Ten class dot products plus biases | 10 signed logits |
 | Argmax | 10 logits | Select the winning class | 4-bit digit index, 0..9 |
 
-Expected parameter counts from that architecture are 36 Conv1 weights + 4 Conv1 biases, 288 Conv2 weights + 8 Conv2 biases, and 9,680 dense weights + 10 dense biases: 10,026 scalar parameters total. A 14-bit address can address locations 0 through 10,025, but this fact alone does not specify the ROM word format or read interface.
+Expected parameter counts from that architecture are 36 Conv1 weights + 4 Conv1 biases, 288 Conv2 weights + 8 Conv2 biases, and 9,680 dense weights + 10 dense biases: 10,026 scalar parameters total. Stage 3.6 uses separate typed arrays loaded from the four exported files; there is no shared address bus.
 
 ## 3. Phase 0: Freeze the Implementable Contract
 
@@ -75,17 +75,11 @@ Status: the implementation choice is resolved in `README.md` Sections 7.1.6, 7.4
 
 Implementation work remains in Phase 4: add an index-coded tensor test that checks every location/channel mapping, channel boundaries, first and last flat values, and full-vector completion. Keep the full vector stable until Dense has consumed all 968 entries.
 
-### 3.6 Parameter memory format and address map
+### 3.6 Parameter memory format and typed-array mapping
 
-The README requires separate files `conv1_weights.mem`, `conv2_weights.mem`, `dense_weights.mem`, and `biases.mem`, and also calls the parameter memory a single flat 10,026-entry array. Current `weights_mem.sv` exposes one address with both an 8-bit weight output and a 20-bit bias output. These statements do not define one unambiguous storage/read interface.
+Status: resolved in `README.md` Sections 7.1.5, 9.10, and 9.12. `weights_mem` exposes six immutable typed arrays loaded from the four exported files: Conv1 weights/biases, Conv2 weights/biases, and Dense weights/biases. There is no shared address bus, clock, reset, or read latency. Layer logic indexes the arrays directly; Dense uses `dense_weights[class][feature_index]` for each of its ten class accumulators.
 
-Choose and document one implementation:
-
-- Separate typed arrays/files with explicit per-array addresses and read ports; or
-- One unified array with a defined common word width/encoding, exact region base addresses and lengths, signed decoding rules, and an interface that selects a parameter type; or
-- Another fully specified representation that preserves the four exported files and removes the simultaneous weight/bias ambiguity.
-
-For whichever option is selected, publish an address table showing exact index ranges, element widths, and the mapping from `(layer, filter/class, channel, kernel position/input index)` to address. State whether simulation reads are combinational or registered and their latency. Confirm the total count remains 10,026 scalar parameters.
+The files contain 36 signed 8-bit Conv1 weights, 288 signed 8-bit Conv2 weights, 9,680 signed 8-bit Dense weights, and 22 signed 20-bit biases. Bias-file indices are Conv1 0..3, Conv2 4..11, and Dense 12..21. Each file is a one-value-per-line hex list, with two digits per weight and five per bias. The total remains 10,026 parameters. Implementation must preserve the README's local file-index formulas and confirm the selected simulator loads and exposes the unpacked arrays without reordering or truncation.
 
 ### 3.7 Golden outputs and reproducibility
 
@@ -98,7 +92,7 @@ Specify which file holds which values, deterministic sample selection, random se
 
 ### 3.8 Tie behavior and invalid cases
 
-Define argmax tie behavior (recommended: retain the lowest digit index by replacing the winner only on strict `>`), behavior for unknown/uninitialized logits if relevant to simulation, and when the top-level prediction is considered valid. Define parameter-memory behavior for out-of-range addresses. Add these to the README rather than leaving behavior implicit.
+Define argmax tie behavior (recommended: retain the lowest digit index by replacing the winner only on strict `>`), behavior for unknown/uninitialized logits if relevant to simulation, and when the top-level prediction is considered valid. For typed parameter arrays, verify initialization and exact element counts rather than defining out-of-range address behavior. Add these to the README rather than leaving behavior implicit.
 
 ### 3.9 Phase 0 exit criteria
 
@@ -139,7 +133,7 @@ Exit criteria: shapes are exact, reruns with the same seed/persisted checkpoint 
 ## 6. Phase 3: Implement Export Utilities and Generate Real Fixtures
 
 1. Implement `model/export_utils.py` with dedicated, tested serializers for signed 8-bit weights, the selected bias/activation/score widths, raw unsigned image bytes, and digit values. Encode negative two's-complement values to exactly the documented number of hex digits. Reject out-of-range values instead of silently truncating unless truncation is the explicitly frozen rule.
-2. Serialize each parameter array using the exact README address/order contract: Conv1 filter then kernel row/column; Conv2 output filter then input channel then kernel row/column; Dense class then input index; biases in Conv1, Conv2, Dense order. If Phase 0 chooses a different memory representation, document how these four exported files feed it.
+2. Serialize each parameter array using the exact README per-file index/order contract: Conv1 filter then kernel row/column; Conv2 output filter then input channel then kernel row/column; Dense class then input index; biases in Conv1, Conv2, Dense order. Emit exactly one scalar per line, with two hex digits for weights and five for biases.
 3. Implement the exporter to produce the four parameter files plus input images and the explicitly defined golden/reference files. Never leave comments or placeholder strings in a file intended for `$readmemh`.
 4. Set and document deterministic sample selection. Keep a small, bounded simulation subset suitable for CI; keep model training/download separate from ordinary RTL regression where possible. If CI is required to train, ensure dataset availability and runtime are reliable, or change the README/CI to use deterministic checked-in test artifacts.
 5. Validate generated data before writing: expected element counts (36, 288, 9,680 weights; 4, 8, 10 biases), legal ranges, exact image count x 784, labels in 0..9, and alignment between images, reference outputs, and labels.
@@ -190,7 +184,7 @@ Exit criteria: the pooled tensor equals the Python reference and every pool bloc
 Implement the Conv2 feature-map neighborhood storage/window generation required by the frozen interface, then implement `rtl/conv_layer_2.sv`.
 
 - Preserve all four channels for each pooled spatial coordinate and form 3 x 3 neighborhoods with 36 samples total.
-- Match the exact `(output_filter, input_channel, kernel_row, kernel_column)` weight order and address calculation.
+- Match the exact `(output_filter, input_channel, kernel_row, kernel_column)` weight order and direct typed-array indexing.
 - Calculate eight output channels for each of the 11 x 11 locations, reducing across all four input channels and all nine kernel positions per channel.
 - Keep Conv2's input and output widths aligned with the frozen numerical contract. Do not narrow pooled activations to 8 bits without an explicit conversion rule.
 - Apply ReLU exactly once at the documented boundary.
@@ -215,22 +209,22 @@ Implement `rtl/dense_layer.sv` after flatten order, parameter access, and numeri
 
 - Initialize ten independent class accumulators from their matching biases at `start_dense`.
 - For each accepted flattened feature index 0..967, multiply it by the weight for each class and accumulate using the specified widths and scale conversion.
-- Read each class's contiguous 968-weight vector according to the frozen memory latency/address map. Ensure synchronous ROM latency, if selected, is accounted for without pairing a feature with the wrong weight.
+- For each accepted feature index `i`, read `dense_weights[class][i]` and the corresponding `dense_biases[class]` from the typed arrays. There is no ROM read latency; accumulate all ten classes with the Stage 3.1 arithmetic.
 - Assert `dense_done` only after input feature 967 has been accumulated and all ten final outputs have been narrowed/registered as specified. Hold logits stable according to the interface contract.
 - Test zero features, one nonzero feature at each boundary/index, one nonzero weight per class, bias-only results, negative values, overflow/rounding cases, and full-vector operation. Compare every logit, not only argmax.
 
 Exit criteria: all ten RTL logits match the integer Python reference exactly for directed and generated vectors.
 
-### 7.7 Parameter ROM
+### 7.7 Typed parameter arrays
 
-Implement `rtl/weights_mem.sv` to the exact Phase 0 storage map.
+Implement `rtl/weights_mem.sv` to the exact Phase 0 typed-array contract.
 
-- Load all exported files using explicit paths valid from the documented simulation working directory.
-- Use signed storage/extension for each type. A 14-bit address is sufficient for 10,026 entries but does not by itself distinguish 8-bit weights from 20-bit biases; implement the chosen type/region selection explicitly.
-- Define reset/read behavior, registered or combinational latency, and out-of-range behavior.
-- Test addresses at the first and last element of every region and around every region boundary; compare the returned signed values against the exporter.
+- Expose the six typed arrays named and dimensioned in README Section 9.12, and load the four `.mem` files from the documented `sim/` working directory.
+- Preserve signed 8-bit weights and signed 20-bit biases without cross-type reinterpretation. Arrays are constant after initialization and have no clocked read latency.
+- Verify file element counts (36, 288, 9,680 weights; 22 biases), each local index formula, signed encodings, and output-array dimensions against generated exporter data.
+- Compile a minimal test that reads first, last, and boundary elements from every output array using the selected simulator.
 
-Exit criteria: all parameter addresses map to exactly one intended exported value and no boundary address aliases another tensor.
+Exit criteria: every typed array element equals the corresponding exported value, all dimensions/counts match, and the simulator accepts the unpacked-array connections without unintended truncation or reordering.
 
 ## 8. Phase 5: Integrate the Sequential Pipeline and Control
 
@@ -307,7 +301,7 @@ Recommended order at a glance:
 7. Implement/test pooling.
 8. Implement/test multi-channel Conv2 windowing and Conv2.
 9. Implement/test flatten reorder.
-10. Implement/test parameter ROM and dense accumulation against the reference.
+10. Implement/test typed parameter arrays and dense accumulation against the reference.
 11. Integrate top and control FSM; verify handshakes and exact element counts.
 12. Complete end-to-end testbench, Makefile/scripts, wave setup, and CI.
 13. Update documentation and run the clean full regression.

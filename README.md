@@ -149,7 +149,7 @@ The Python exporter uses the same fixed-point scales and limits as the RTL:
 
 - Convert each floating-point weight to signed Q1.7 by multiplying by 128, rounding to nearest with ties away from zero, and saturating to [-128, 127].
 - Convert each floating-point bias to signed Q6.14 by multiplying by 16384, rounding to nearest with ties away from zero, and saturating to [-524288, 524287].
-- Encode exported weights as signed 8-bit two's-complement values and biases as signed 20-bit two's-complement values. The text-file hex width and `$readmemh` representation must be specified consistently by the export implementation.
+- Encode exported weights as signed 8-bit two's-complement values using exactly two hexadecimal digits per value, and biases as signed 20-bit two's-complement values using exactly five hexadecimal digits per value. Write one scalar per line as specified in Section 7.1.5.
 - The input image remains unsigned 8-bit raw pixel data in its memory file; apply the Q1.7 conversion in the RTL datapath and in the integer reference, not in the input-file serializer.
 - The Python integer reference must reproduce each RTL product width, bias alignment, 40-bit accumulation, arithmetic shift, saturation, ReLU, and pooling operation exactly. Model quantization and inference must not depend on host-language overflow behavior.
 
@@ -500,7 +500,7 @@ This is the expected total parameter footprint for the export script.
 
 The export script and RTL memory files must follow one fixed memory layout. The following order is required and must be used consistently in Python generation and hardware reading.
 
-The parameter memory is addressed as a flat 1D read-only array. The total parameter count is 10,026 values, so the memory address width must be at least 14 bits to cover a range of 0..10,025. The RTL skeleton therefore uses a 14-bit address bus for the parameter ROM interface.
+Parameters are held in separate typed read-only arrays loaded from the four exported files. There is no shared parameter address bus: each weight array uses its own zero-based file order, and the bias arrays are sliced from the one ordered bias file. `weights_mem` exposes the complete arrays to the layers; indexing is combinational with no read latency. This matches the existing Conv1/Conv2 weight-array interfaces and lets Dense read one weight for each of its ten classes for a given feature index.
 
 #### Conv1 weights memory layout
 
@@ -552,6 +552,21 @@ biases.mem = [
 ```
 
 This ordering must match how the RTL reads the bias parameters.
+
+#### Typed array and file-index map
+
+Each memory file contains exactly one scalar per line and no comments. Signed 8-bit weights use exactly two hexadecimal digits per value; signed 20-bit biases use exactly five hexadecimal digits per value. Hex digits encode the value's two's-complement bit pattern.
+
+| `weights_mem` output array | File | Local file indices | Element width | Index formula |
+|---|---|---:|---:|---|
+| `conv1_weights[0:3][0:8]` | `conv1_weights.mem` | 0..35 | signed 8-bit | `filter * 9 + ky * 3 + kx` |
+| `conv2_weights[0:7][0:35]` | `conv2_weights.mem` | 0..287 | signed 8-bit | `filter * 36 + channel * 9 + ky * 3 + kx` |
+| `dense_weights[0:9][0:967]` | `dense_weights.mem` | 0..9679 | signed 8-bit | `class * 968 + input_index` |
+| `conv1_biases[0:3]` | `biases.mem` | 0..3 | signed 20-bit | `filter` |
+| `conv2_biases[0:7]` | `biases.mem` | 4..11 | signed 20-bit | `4 + filter` |
+| `dense_biases[0:9]` | `biases.mem` | 12..21 | signed 20-bit | `12 + class` |
+
+The three weight files contain 10,004 values total; the bias file contains 22. The combined parameter count remains 10,026. These are per-file element indices, not addresses on a shared ROM bus. `weights_mem` loads the arrays during simulation initialization, then holds them unchanged. Inference begins after initialization; there is no clocked parameter-read transaction or out-of-range address behavior.
 
 ### 7.1.6 Flatten ordering contract
 
@@ -804,8 +819,10 @@ Purpose: compute the final 10 class logits from the flattened features.
 Required behavior:
 
 - accept the flattened feature vector in sequence
+- receive `dense_weights[0:9][0:967]` as signed 8-bit values and `dense_biases[0:9]` as signed 20-bit values from `weights_mem`
 - compute the dot product for each class
 - `start_dense` initializes the ten accumulators; accept flat indices 0..967 sequentially when `feature_valid` is high
+- for each accepted flat index `i`, use `dense_weights[class][i]` for each class and add `dense_biases[class]` at initialization, following Section 5 arithmetic
 - after the final accepted feature and all parameter operations complete, register `logits[0:9]` and assert `dense_done` for one cycle
 
 ---
@@ -825,12 +842,12 @@ Required behavior:
 
 Purpose: load the exported CNN weights and bias values for the hardware pipeline.
 
-Required responsibilities:
+Required interface and behavior:
 
-- store conv1 parameters
-- store conv2 parameters
-- store dense-layer parameters
-- provide fixed read-only values during simulation
+- expose signed `conv1_weights[0:3][0:8]`, `conv1_biases[0:3]`, `conv2_weights[0:7][0:35]`, `conv2_biases[0:7]`, `dense_weights[0:9][0:967]`, and `dense_biases[0:9]` arrays
+- load the arrays from `conv1_weights.mem`, `conv2_weights.mem`, `dense_weights.mem`, and `biases.mem` in the documented order
+- use combinational array indexing with no clock, reset, address, or read-latency interface; parameters remain constant after initialization
+- load files relative to the documented simulation working directory (`sim/`)
 
 ---
 

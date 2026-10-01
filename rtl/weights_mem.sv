@@ -5,18 +5,15 @@
 // - support read-only values for the simulation environment
 
 module weights_mem (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic [13:0] addr,
-    output logic signed [7:0] weight_out,
-    output logic signed [19:0] bias_out
+    output logic signed [7:0] conv1_weights [0:3][0:8],
+    output logic signed [19:0] conv1_biases [0:3],
+    output logic signed [7:0] conv2_weights [0:7][0:35],
+    output logic signed [19:0] conv2_biases [0:7],
+    output logic signed [7:0] dense_weights [0:9][0:967],
+    output logic signed [19:0] dense_biases [0:9]
 );
 
-    // Final repo protocol:
-    // - parameter ROM is a flat 1D memory that stores all exported weights and biases
-    // - total parameter count = 10,026, so 14 bits are required to address 0..10,025
-    // - the output read format must match the Python export ordering contract in README.md
-    // TODO: define the parameter arrays and initialization values.
-    // TODO: ensure the storage order matches the export and dense-layer logic.
+    // Typed arrays load the four exported files and remain constant after initialization.
+    // TODO: load arrays using the per-file index and signed-hex formats in README.md.
 
 endmodule

@@ -11,11 +11,13 @@ module dense_layer (
     input  logic        start_dense,
     input  logic signed [19:0] feature_pixel,
     input  logic        feature_valid,
+    input  logic signed [7:0] dense_weights [0:9][0:967],
+    input  logic signed [19:0] dense_biases [0:9],
     output logic        dense_done,
     output logic signed [19:0] logits [0:9]
 );
 
-    // TODO: implement score accumulation for digits 0 through 9.
-    // TODO: match the export ordering and class mapping from Python.
+    // For flat index i, each class reads dense_weights[class][i].
+    // TODO: implement ten accumulators using the Section 5 arithmetic rules.
 
 endmodule
