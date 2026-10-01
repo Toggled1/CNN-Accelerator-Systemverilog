@@ -268,32 +268,25 @@ The export script and RTL design must use the same conventions.
 - ReLU and pooling are executed at the correct stage boundaries
 - all class logits are compared using the same signed interpretation
 
-### 7.1 Dataflow model: streaming CNN, neighborhood-based stages
+### 7.1 Dataflow model: stage-sequenced streaming
 
-This project is designed as a streaming CNN datapath. The image, feature-map values, and intermediate activations move through the pipeline over clock cycles. The stages are not implemented as a single monolithic combinational block that receives the whole network at once.
+The inference is controlled one stage at a time by the FSM. Image pixels enter as a row-major stream, and each active stage processes one scalar, vector, or complete local neighborhood per clock as defined below. Fixed-size buffers hold the image and intermediate feature maps between FSM stages. This simulation-only design uses those buffers instead of a concurrent pipeline with ready/backpressure logic at every boundary.
 
-The important clarification is:
-
-- the CNN as a whole is streaming
-- however, some stages operate on a local neighborhood (for example, a 3x3 receptive field or a 2x2 pooling window)
-- those neighborhoods are represented in RTL as local arrays such as `window[0:8]` or `pool_block[0:3]`
-- those arrays are temporary working buffers used to accumulate the local region before producing one output activation or one pooled value
-- the same protocol is used everywhere: one valid sample or one valid local neighborhood per cycle, with the result emitted only after the neighborhood is complete
-
-This means the design is not a "full tensor passed all at once" model. Instead, it is a valid/ready streaming pipeline where a local neighborhood is assembled over time and then processed once complete.
+No complete tensor is transferred across a module boundary in one cycle. The controller reads or writes one defined item per cycle, while arrays are storage owned by the top-level design or the stage that builds a neighborhood. Convolution and pooling neighborhood arrays are complete payloads for one local operation, not implicit multi-cycle transfers.
 
 ### 7.1.1 Final protocol choice for the repository
 
-The project chooses the following single, consistent protocol:
+The final protocol is:
 
-- the image is streamed one pixel at a time into the CNN
-- `line_buffer` assembles a 3x3 receptive field from the stream and emits one `window_valid` pulse when the window is ready
-- each convolution stage consumes one complete receptive field and emits one valid output activation per filter or per output location
-- ReLU is applied per activation sample, one value at a time
-- an upstream producer assembles each complete same-channel 2x2 pooling block; pooling accepts one block and emits one scalar per transfer
-- the dense stage consumes flattened values in sequence and computes the logits
+- The top-level accepts `start` only in `IDLE`. The first pixel is not accepted on the same edge as `start`.
+- During `LOAD_IMAGE`, `ready` is high until 784 pixels have been accepted. A pixel transfers only on a rising edge with `pixel_valid && ready`; if `pixel_valid` is low, the image counter and buffer do not advance. Accepted pixels are stored as unsigned bytes in row-major order.
+- After pixel 784, `ready` goes low and the FSM processes the buffered image through `CONV1`, `RELU1`, `POOL`, `CONV2`, `RELU2`, `FLATTEN`, and `DENSE`, in that order. These stages do not operate concurrently.
+- Internal module inputs transfer on a rising edge when both `valid_in` and that stage's `enable` are high. The FSM asserts `enable` only when the source item exists and the destination's fixed buffer has space. Internal interfaces have no `ready` signal and do not stall; source arrays retain unconsumed values, and the controller captures each output-valid result.
+- Registered Conv1, pooling, and Conv2 outputs assert `valid_out` for one cycle with the result available. The FSM counts accepted inputs and captured outputs; it advances only after the exact stage output count is complete. ReLU is combinational and is applied to all channels of one spatial vector in parallel during its FSM state.
+- Flatten consumes one eight-channel Conv2 vector per spatial location and fills the 968-entry output vector in the frozen channel-major order. It asserts `valid_out` once the complete vector is available. Dense then consumes those 968 values in sequence and asserts `dense_done` once all ten logits are final.
+- Argmax evaluates the ten signed logits after `dense_done`. The top-level captures the winning digit and asserts `done` for one cycle.
 
-This is the final protocol contract for the repository. Array-based local buffers like `window[0:8]` and `pool_block[0:3]` are storage for a local neighborhood, not evidence that the whole tensor is transferred in one cycle.
+This is a sequential, buffered streaming design, not a concurrent ready/valid pipeline. The full-tensor buffers and their exact capacities are specified in Section 7.4.
 
 ### 7.2 Exact stage semantics
 
@@ -357,24 +350,72 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 
 ### 7.4 Interface contract for the actual implementation
 
-The dataflow contract should be interpreted as follows:
+#### Transaction control
 
-FSM order: `IDLE -> LOAD_IMAGE -> CONV1 -> RELU1 -> POOL -> CONV2 -> RELU2 -> FLATTEN -> DENSE -> DONE`
+- `rst_n` is an active-low asynchronous reset. It resets the FSM, counters, valid/done flags, and predicted digit. Large data arrays do not need reset; every item is overwritten before its stage reads it.
+- `start` is accepted only while the FSM is in `IDLE`. A start while busy is ignored. The first pixel may be presented on the following cycle.
+- `ready` is high only in `LOAD_IMAGE` while fewer than 784 pixels have been accepted. A pixel is accepted on a rising edge when `pixel_valid && ready` is true. When `pixel_valid` is low, `ready` may remain high and the input count holds. After the 784th accepted pixel, `ready` goes low and remains low until a later inference enters `LOAD_IMAGE`.
+- A reset during an inference aborts it and returns the FSM to `IDLE`; a new `start` is required. No partial image or intermediate result is reused.
+- `done` is asserted for exactly one cycle in `DONE`. `predicted_digit` is captured before that pulse and remains stable until reset or the next completed inference. The FSM returns to `IDLE` after the `DONE` cycle; the next `start` can be accepted in `IDLE`.
 
-1. `start` is asserted to begin one inference pass.
-2. The image is streamed in row-major order as 8-bit values.
-3. The line buffer assembles a valid 3x3 neighborhood for the convolution stage.
-4. Conv1 produces 4 output feature maps.
-5. ReLU1 is applied to each Conv1 activation value.
-6. The upstream pool-block producer assembles each same-channel 2x2 region in top-left, top-right, bottom-left, bottom-right order; the pool stage emits its maximum. Blocks are ordered by pooled row, pooled column, then channel.
-7. Conv2 consumes the pooled feature map values and produces 8 output channels.
-8. ReLU2 is applied to each Conv2 activation value.
-9. Flatten generates the 968-element vector.
-10. Dense computes 10 logits.
-11. Argmax selects the winning class.
-12. `done` is asserted once the final class is valid.
+#### Internal transfers and buffering
 
-This defines the intended pipeline clearly: it is a streaming CNN, while the local convolution and pooling stages operate over small neighborhoods that are temporarily buffered in arrays.
+- For a module with both `valid_in` and `enable`, an input transfer occurs on a rising edge when both are high. Modules without `enable` use their documented valid signal only while the FSM is in the owning state: `line_buffer` consumes image-buffer pixels on `pixel_valid`, `flatten_layer` consumes channel vectors on `valid_in`, and `dense_layer` consumes features on `feature_valid` after `start_dense`.
+- There is no internal `ready` or backpressure. A disabled stage does not consume its input; its source buffer keeps that item available. The FSM activates a stage only when its input exists and its fixed destination buffer has capacity.
+- A registered stage presents `valid_out` for one cycle with the result available during that cycle. The controller captures the result on the rising edge at the end of the valid cycle. Each stage's latency and result counts are fixed by its module contract; the FSM transitions based on captured item counts, not a guessed delay.
+- All counters advance only on the stated transfer or output-valid event. Each stage completes only at the specified item count; no stage transition is based on a guessed fixed delay.
+- ReLU operates combinationally on one channel vector per spatial position, with one scalar ReLU operation per channel in parallel. It does not add a separate valid cycle.
+- The pooling and convolution window producers assemble complete local arrays before asserting the receiving stage's valid signal. A local array is one operation's payload, not a sequence of scalar input transfers.
+
+#### Boundary signal map
+
+| Boundary | Transfer condition | Payload and completion |
+|---|---|---|
+| Host to image buffer | Rising edge with `pixel_valid && ready` in `LOAD_IMAGE`. | One unsigned pixel; 784 accepted pixels complete the image. |
+| Image buffer to line buffer | In `CONV1`, pulse `clear` for one cycle before scanning; then assert the line-buffer `pixel_valid` for each buffered pixel. | One raw pixel per cycle; the line buffer emits one row-major Q1.7 3 x 3 window whenever `window_valid` is high, 676 windows total. `clear` has priority and consumes no pixel. |
+| Line buffer to Conv1 | Rising edge with `window_valid && enable_conv1`. | One signed Q1.7 window of nine values. Conv1 emits 676 four-value results using `valid_out`. |
+| Conv1 map to ReLU1 | One location vector per cycle during `RELU1`; no registered handshake. | Four signed Q6.14 values per location; all four are ReLU-processed in parallel and written back in place. |
+| ReLU1 map to pool block / Pool | Rising edge with pooling `valid_in && enable`. | One complete same-channel four-value block; pooling emits one scalar with `valid_out`, 676 scalars total. |
+| Pooled map to Conv2 | On entry to `CONV2`, reset the window-source row/column counters to zero. Assert internal `conv2_window_valid` for each complete window; Conv2 accepts on `conv2_window_valid && enable_conv2`. | One signed Q6.14 window of 36 values; Conv2 emits eight signed Q6.14 values with `valid_out`, 121 vectors total. |
+| Conv2 map to ReLU2 | One location vector per cycle during `RELU2`; no registered handshake. | Eight signed Q6.14 values per location; all eight are ReLU-processed in parallel and written back in place. |
+| Conv2 map to Flatten | Rising edge with Flatten `valid_in` during `FLATTEN`. | One eight-channel location vector; after 121 accepted vectors, `valid_out` pulses once for the complete 968-value `flattened_vector`. |
+| Flatten vector to Dense | Pulse `start_dense` on the first `DENSE` cycle while `feature_valid` is low; then assert `feature_valid` once for each flat index 0..967. | One signed Q6.14 feature per valid cycle. Dense asserts `dense_done` once all ten logits are final. |
+| Dense logits to Argmax/top | `dense_done` qualifies the completed logits; Argmax is combinational. | Ten signed Q6.14 logits; the top-level captures the selected 4-bit digit and asserts `done` in `DONE`. |
+
+All `valid_out` and completion signals are cleared by reset. A one-cycle valid signal means one result is available during that cycle; adjacent high cycles represent adjacent results where a stage emits one result per cycle. The controller captures results only when valid is high. Flattened data remains stable throughout Dense processing, and logits remain stable from `dense_done` until reset or the next inference completes. Internal stages do not wait for downstream readiness.
+
+#### Stage sequence, payloads, and exact counts
+
+FSM order: `IDLE -> LOAD_IMAGE -> CONV1 -> RELU1 -> POOL -> CONV2 -> RELU2 -> FLATTEN -> DENSE -> DONE`.
+
+| State | Input and processing order | Completed output |
+|---|---|---|
+| `LOAD_IMAGE` | Accept 784 unsigned bytes in row-major order into the image buffer. | One complete 28 x 28 image. |
+| `CONV1` | Clear the line buffer, then read all 784 image bytes one per cycle through it. It converts pixels to Q1.7 and emits each complete row-major 3 x 3 window with `window_valid`; Conv1 accepts when `window_valid && enable_conv1`. | 676 valid locations, each with four pre-ReLU Q6.14 values. |
+| `RELU1` | Apply ReLU to each of the four values at every Conv1 location and replace the values in the Conv1 buffer. | 676 four-channel locations, 2,704 values. |
+| `POOL` | Assemble one same-channel block in TL, TR, BL, BR order; process by pooled row, pooled column, then channel. | 676 signed Q6.14 values (13 x 13 x 4), stored location-major with channels 0..3 consecutive. |
+| `CONV2` | Reset the window-source row/column counters to zero, then read the pooled map and form complete 36-value windows using the mapping in Section 7.1.3. Conv2 accepts 121 windows in row-major output-location order. | 121 locations, each with eight pre-ReLU Q6.14 values. |
+| `RELU2` | Apply ReLU to each of the eight values at every Conv2 location and replace the values in the Conv2 buffer. | 121 eight-channel locations, 968 values. |
+| `FLATTEN` | Read the 121 eight-channel locations and reorder into channel-major, row-major, column-major order. | One complete 968-value signed Q6.14 vector and one completion pulse. |
+| `DENSE` | Pulse `start_dense` on entry, then present flat indices 0..967 sequentially with `feature_valid`. Dense handles parameter access and accumulates all ten class scores. | Ten final signed Q6.14 logits and one `dense_done` pulse. |
+| `DONE` | Evaluate/capture argmax result from the completed logits. | One-cycle `done` pulse and stable `predicted_digit`. |
+
+#### Fixed buffer capacities
+
+The top-level controller owns the full-image/interstage storage needed by the sequential FSM. Capacities count scalar entries unless stated otherwise:
+
+| Buffer | Capacity | Element format |
+|---|---:|---|
+| Input image | 784 | Unsigned 8-bit raw pixels |
+| Conv1 feature map | 2,704 (26 x 26 x 4) | Signed Q6.14; ReLU is performed in place |
+| Pooled feature map | 676 (13 x 13 x 4) | Signed Q6.14 |
+| Conv2 feature map | 968 (11 x 11 x 8) | Signed Q6.14; ReLU is performed in place |
+| Flattened vector | 968 | Signed Q6.14, channel-major order |
+| Dense accumulators | 10 | Signed 40-bit values, per Section 5 |
+
+These buffers make stage-by-stage sequencing explicit and bounded. They are simulation storage, not an FPGA/ASIC area target. No module may read beyond the valid item count for its current inference.
+
+The row-major scalar index in the input image buffer is `r * 28 + c`. Store Conv1 output vectors as `(r * 26 + c) * 4 + ch`, pooled values as `(pr * 13 + pc) * 4 + ch`, and Conv2 output vectors as `(r * 11 + c) * 8 + f`. Flatten performs the separate channel-major reorder defined in Section 7.1.6.
 
 ---
 
@@ -529,22 +570,7 @@ This corresponds to a channel-major, row-major, column-major layout.
 
 ### 7.1.7 Handshake and stage sequencing
 
-The design must use a deterministic sequential pipeline with explicit valid/ready behavior:
-
-1. `start` is asserted to begin one inference pass.
-2. The image is streamed in row-major order as 8-bit values.
-3. The line buffer assembles a 3x3 receptive field and asserts `window_valid` when the window is complete.
-4. Conv1 consumes each valid 3x3 window and produces 4 output activations for that spatial location.
-5. ReLU1 runs on each Conv1 activation value as it is produced.
-6. Pooling assembles a 2x2 block and emits one valid pooled value only after all four inputs in the block have arrived.
-7. Conv2 consumes pooled windows and produces 8 output channels.
-8. ReLU2 runs on the Conv2 outputs.
-9. Flatten generates the 968-element vector in the channel-major, row-major, column-major order defined above.
-10. Dense computes 10 logits.
-11. Argmax selects the winning digit.
-12. `done` is asserted once the final class is valid.
-
-The important point is that no stage should silently reorder or reinterpret the output tensor without matching the same indexing convention in Python and RTL.
+Section 7.4 is the authoritative contract for top-level handshaking, internal transfers, stage order, storage, output counts, reset, completion, and the pixel-to-prediction lifecycle. Module code and tests must follow it exactly.
 
 ---
 
@@ -643,16 +669,16 @@ endmodule
 
 Responsibilities:
 
-- initialize and control the inference cycle
-- coordinate the flow through both convolution stages, pooling, flatten, dense layer, and argmax
-- manage valid/ready signaling for the image stream
-- provide the final digit once the network finishes processing
+- accept `start` only in `IDLE`, then accept exactly 784 pixels using the top-level `pixel_valid && ready` handshake
+- store the raw image and run each CNN stage in the order and with the buffer capacities defined in Section 7.4
+- use internal `valid_in && enable` transfers; do not add internal ready/backpressure
+- capture the argmax result and assert the one-cycle `done` pulse when the prediction is valid
 
 ---
 
 ### 9.3 `rtl/control_fsm.sv`
 
-Purpose: coordinate the full CNN inference flow.
+Purpose: coordinate the stage-sequenced inference transaction and fixed-size intermediate buffers.
 
 Required states:
 
@@ -669,11 +695,12 @@ Required states:
 
 Responsibilities:
 
-- wait for the `start` signal
-- stream image pixels into the convolution pipeline
-- trigger the appropriate activation and pooling stages
-- hand off the flattened feature vector to the dense classifier
-- assert `done` when the final prediction is valid
+- accept `start` only in `IDLE` and control top-level pixel acceptance in `LOAD_IMAGE`
+- enable exactly one compute stage at a time in the order listed above
+- clear per-stage counters/window state on entry to the corresponding stage
+- capture each registered output when its `valid_out` is asserted and count exact expected outputs
+- start Dense after the complete flattened vector is available and wait for `dense_done`
+- assert `done` for one cycle in `DONE`, then return to `IDLE`
 
 ---
 
@@ -684,8 +711,10 @@ Purpose: maintain enough image history to generate the 3x3 sliding window for co
 Required behavior:
 
 - keep previous rows required for a local 3x3 neighborhood
-- output nine pixels per valid convolution window
-- ensure no invalid window is generated before sufficient data exists
+- accept one input pixel whenever `pixel_valid` is high during `CONV1`; `clear` has priority and resets row/column history before the scan
+- convert each raw unsigned pixel to signed Q1.7 using the Section 5 rule before placing it in a window
+- output nine signed Q1.7 samples in row-major window order with `window_valid` for each complete window
+- emit exactly 676 valid windows from one 28 x 28 image; no window may cross a row boundary
 
 ---
 
@@ -698,7 +727,9 @@ Required behavior:
 - accept a 28x28 input image window and generate 26x26x4 output activations
 - apply the set of weights and biases for each filter
 - accumulate intermediate sums in the 40-bit signed MAC accumulator defined in Section 5
-- output valid feature-map activations for the ReLU stage
+- accept each valid window when `valid_in && enable` is true on a rising edge
+- register all four pre-ReLU signed Q6.14 filter results for that location and assert `valid_out` for one cycle with the vector
+- produce exactly 676 four-value vectors, in row-major output-location order
 
 ### 9.6 `rtl/conv_layer_2.sv`
 
@@ -750,6 +781,7 @@ Required behavior:
 
 - serialize the final convolution output in a defined order
 - maintain deterministic ordering between software export and hardware flattening
+- accept one eight-channel Conv2 vector per spatial location during `FLATTEN`; after all 121 locations, assert `valid_out` for one cycle and expose the complete 968-value channel-major vector
 
 ---
 
@@ -761,7 +793,8 @@ Required behavior:
 
 - accept the flattened feature vector in sequence
 - compute the dot product for each class
-- output logits[0:9]
+- `start_dense` initializes the ten accumulators; accept flat indices 0..967 sequentially when `feature_valid` is high
+- after the final accepted feature and all parameter operations complete, register `logits[0:9]` and assert `dense_done` for one cycle
 
 ---
 
@@ -894,7 +927,7 @@ A CNN can become too large if more layers or filters are added before the small 
 
 ### 13.3 Timing and handshake correctness
 
-Because this is a streaming design, valid/ready sequencing must be consistent across modules.
+The top-level pixel input uses `pixel_valid && ready`; internal stage sequencing uses the documented valid/enable signals and fixed buffers. The controller must preserve the exact transfer counts and stage transitions in Section 7.4.
 
 ---
 

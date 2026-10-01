@@ -63,33 +63,17 @@ Implementation must preserve this block mapping, order, and latency. Stage 3.4 s
 
 ### 3.4 Streaming and control protocol
 
-The README calls the design a streaming pipeline with valid/ready behavior, but only the top-level example has `ready`. Existing internal module ports are mostly `valid_in`/`valid_out` or enable signals and do not provide consistent ready/backpressure. The README also names a stage-by-stage FSM, which can imply whole-stage sequencing rather than an always-flowing pipeline.
+Status: resolved in `README.md` Sections 7.1, 7.1.7, 7.4, 9.2, and 9.3. The top-level accepts `start` only in `IDLE`, then accepts exactly 784 row-major unsigned pixels using `pixel_valid && ready` while in `LOAD_IMAGE`. Pixel-valid gaps pause input counting. `ready` is low during compute and after the final pixel. Reset is active-low asynchronous and aborts the current transaction; `done` is a one-cycle pulse in `DONE`, after which the FSM returns to `IDLE`.
 
-Specify one protocol for every boundary:
+The FSM processes one stage at a time in the specified state order, using the fixed-size image/interstage buffers and capacities listed in README Section 7.4. At the external image input, a pixel transfers on rising-edge `pixel_valid && ready`. Internally, modules with `valid_in` and `enable` accept on rising-edge `valid_in && enable`; the line buffer consumes `pixel_valid` during `CONV1`, Flatten consumes `valid_in` during `FLATTEN`, and Dense consumes `feature_valid` after `start_dense` during `DENSE`. There are no internal ready signals or backpressure. Disabled stages do not consume input, and source buffers retain items until use. `clear` is asserted before a window-generation scan and has priority over pixel input. Registered modules pulse `valid_out` with each result, and the controller counts captured outputs; stage changes depend on exact item counts rather than guessed delays. ReLU is combinational across a channel vector. Flatten publishes completion only after its full channel-major 968-value vector is ready; Dense signals completion with `dense_done` after producing all logits.
 
-1. Whether an input transfers on `valid && ready`, or whether a valid-only, fixed-rate interface is used.
-2. Whether `ready` is required between every pair of stages or only at the top-level image input.
-3. How the pipeline behaves when input `pixel_valid` pauses.
-4. Whether internal stages may stall and how upstream values are retained during a stall.
-5. How `start`, `clear`, `ready`, `done`, and reset interact; define whether `done` is a pulse or a held level and when a new image may start.
-6. How each module signals completion, including the final feature-map item and the final flattened value.
-7. Whether each stage operates concurrently as a pipeline or the controller processes complete stage tensors in FSM phases. If phase-based, specify where intermediate tensors are buffered and how large they are.
-8. Whether each valid output corresponds to a scalar, a vector of all channels at one coordinate, or a complete neighborhood.
-
-Do not implement handshakes based only on comments. Add every required signal to the owning interface and document transfer/hold behavior.
+Implementation must follow the README buffer capacities, payload granularity, output counts, reset/start/done lifecycle, and no-backpressure rule. Do not convert the design into a concurrent elastic pipeline without revising the canonical specification and verification plan.
 
 ### 3.5 Flatten ordering and buffering
 
-The README explicitly fixes channel-major order:
+Status: the implementation choice is resolved in `README.md` Sections 7.1.6 and 7.4. Flatten accepts one eight-channel vector for each of 121 spatial locations, stores/reorders all 968 values into the required channel-major, row-major, column-major vector, then asserts `valid_out` once the complete vector is available. The output is the existing 968-element array payload; Dense consumes it sequentially by flat index. The Python model/export order and Dense weight order must use this exact layout.
 
-```text
-for ch = 0..7:
-  for row = 0..10:
-    for col = 0..10:
-      flat.push(conv2_out[ch][row][col])
-```
-
-The current flatten port receives eight channel values together, which naturally represents one spatial coordinate at a time. A location-major stream of those eight-value vectors is not already channel-major. To preserve the README order, either define the storage/reordering required by Flatten, or revise the data production protocol so channel-major values arrive in sequence. State precisely which option the implementation will use, how it identifies all 121 spatial positions, and when `valid_out` indicates that the flattened vector is complete or an individual value is available. The Python model/export order and dense memory order must use this same choice.
+Implementation work remains in Phase 4: add an index-coded tensor test that checks every location/channel mapping, channel boundaries, first and last flat values, and full-vector completion. Keep the full vector stable until Dense has consumed all 968 entries.
 
 ### 3.6 Parameter memory format and address map
 
@@ -248,20 +232,20 @@ Implement `rtl/weights_mem.sv` to the exact Phase 0 storage map.
 
 Exit criteria: all parameter addresses map to exactly one intended exported value and no boundary address aliases another tensor.
 
-## 8. Phase 5: Integrate the Streaming Pipeline and Control
+## 8. Phase 5: Integrate the Sequential Pipeline and Control
 
 Only integrate modules after their unit contracts pass.
 
 1. Connect Conv1 -> ReLU1 -> Pool -> Conv2 windowing -> Conv2 -> ReLU2 -> Flatten -> Dense -> Argmax in `rtl/top_classifier.sv`.
 2. Add/instantiate the required line-buffer or feature-map storage for both convolution stages. The existing line buffer comment describes Conv1, while Conv2 needs a four-channel activation line buffer or equivalent.
-3. Implement `rtl/control_fsm.sv` to the frozen protocol. Do not retain state names merely for appearance if the specified stages are a concurrent valid pipeline; use states/signals that correctly describe actual sequencing and update the README accordingly.
+3. Implement `rtl/control_fsm.sv` to the frozen stage-by-stage protocol and exact state sequence. Keep the stages sequential; do not replace the fixed-buffer design with a concurrent elastic pipeline.
 4. Ensure there is one source of truth for state/control: avoid independently duplicating counters or completion conditions in top and FSM.
 5. Count accepted image pixels, windows, pool outputs, Conv2 locations, flattened values, and dense values. Detect or assert against early/late completion in simulation.
-6. Assert `ready` only when the top can accept the next input item. Ensure a stalled `pixel_valid` or downstream stall cannot drop or duplicate data.
+6. Assert top-level `ready` only while collecting image pixels and fewer than 784 have been accepted. A low `pixel_valid` pauses the input counter. Internal stages do not stall or backpressure; their fixed buffers retain data until the owning FSM state consumes it.
 7. Define one-image lifecycle: reset/clear internal counters and buffers at the documented point, ignore or reject `start` while busy as specified, and assert `done` once for a complete prediction. The next inference must not depend on stale state from the previous image.
-8. Add simulation-only assertions where supported for legal state progression, valid/ready stability, expected counts, and parameter bounds.
+8. Add simulation-only assertions where supported for legal state progression, top-level valid/ready behavior, internal valid/enable acceptance, expected counts, and parameter bounds.
 
-Exit criteria: a directed image traverses the integrated DUT with exact transfer counts and no protocol assertion failures; top prediction and logits match the Python integer reference.
+Exit criteria: a directed image traverses each sequential FSM phase with exact transfer counts, every required intermediate buffer is populated before use, and no protocol assertion fails; top prediction and logits match the Python integer reference.
 
 ## 9. Phase 6: End-to-End Testbench and MNIST Validation
 
@@ -282,7 +266,7 @@ Exit criteria: directed arithmetic tests, exported fixture checks, and end-to-en
 1. Complete `sim/Makefile` so `compile` lists every required RTL source and the testbench, `run` executes the compiled simulation, `wave` opens the generated VCD with `sim/wave_config.gtkw`, and `clean` removes only generated outputs.
 2. Make `sim/run_sim.sh` a reliable wrapper around compile and run. Verify invocation from the repository root and another directory.
 3. Add `$dumpfile`/`$dumpvars` behind a documented testbench or simulator option so normal simulation does not produce unnecessary repository artifacts.
-4. Populate `sim/wave_config.gtkw` only after final signal names are known. Include clock/reset, top handshake/control, each stage's valid/ready signals, coordinate/counter state, representative MAC accumulator/weight data, dense completion/logits, and final prediction.
+4. Populate `sim/wave_config.gtkw` only after final signal names are known. Include clock/reset, top pixel valid/ready, FSM state and stage enables, internal valid/enable signals, coordinate/counter state, representative MAC accumulator/weight data, dense completion/logits, and final prediction.
 5. Update `.github/workflows/ci.yml` so a clean checkout installs only necessary dependencies, runs Python unit/export checks, compiles the RTL, and runs deterministic simulation. Keep the CI job bounded and make each failure propagate to the workflow.
 6. Avoid dependence on an interactive GTKWave session in CI. GTKWave remains a local debug target; the waveform file should be optional.
 7. If CI calls training or downloads MNIST, verify the action is deterministic and reliable under GitHub-hosted runner network/runtime limits. Prefer validating checked-in or generated deterministic fixtures unless the README explicitly requires live dataset acquisition in CI.
