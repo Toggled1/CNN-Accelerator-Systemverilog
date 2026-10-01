@@ -1,3 +1,0 @@
-# TODO: populate this file with exported 8-bit signed weights.
-# This file must match the Python export format defined in README.md Section 10.
-# Keep the ordering consistent with the RTL memory layout and dense-layer logic.

@@ -1,10 +1,11 @@
-// TODO: implement the top-level classifier module per README.md Section 9.2.
-// Required behavior:
-// - accept a start signal and pixel stream
-// - manage the inference cycle for one MNIST image
-// - coordinate the line buffer, MAC stage, activation, dense layer, and argmax
-// - assert done when the final digit prediction is valid
-// - provide the predicted_digit output to the testbench
+// TODO: implement the top-level CNN classifier described in README.md.
+// Required flow:
+// - stream MNIST pixels into the first convolution stage
+// - apply ReLU and pooling
+// - process second convolution stage
+// - flatten feature maps
+// - compute dense logits
+// - return the winning digit via argmax
 
 module top_classifier (
     input  logic        clk,
@@ -17,7 +18,8 @@ module top_classifier (
     output logic [3:0]  predicted_digit
 );
 
-    // TODO: instantiate control_fsm, line_buffer, mac_unit, relu, dense_layer, argmax.
-    // TODO: connect the model parameters and output signals per README.md.
+    // TODO: instantiate the CNN pipeline.
+    // TODO: connect conv_layer_1, pooling_layer, conv_layer_2, flatten_layer, dense_layer, argmax.
+    // TODO: keep valid/ready and done semantics aligned with the CNN FSM in control_fsm.sv.
 
 endmodule

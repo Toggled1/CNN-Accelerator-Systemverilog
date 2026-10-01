@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# TODO: implement the shell runner described in README.md Section 11.
-# This script should compile and run the RTL simulation with the correct arguments.
+# Run the small MNIST CNN RTL simulation workflow.
+# This script is intended to mirror the workflow in README.md.
 
 set -e
 
-# TODO: run the Python export step if needed.
-# TODO: compile the RTL design.
-# TODO: execute the testbench.
-# TODO: print the final pass/fail summary.
+cd "$(dirname "$0")/.."
 
-echo "TODO: implement the simulation runner per the README specification."
+# Optional: regenerate model weights and validation data before simulation.
+# python3 model/train_and_export.py
+
+# Compile the RTL and testbench.
+make -C sim compile
+
+# Execute the simulation and validate predictions against golden outputs.
+make -C sim run
+
+echo "MNIST CNN simulation workflow completed."

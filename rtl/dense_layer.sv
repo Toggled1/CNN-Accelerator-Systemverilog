@@ -9,7 +9,7 @@ module dense_layer (
     input  logic        clk,
     input  logic        rst_n,
     input  logic        start_dense,
-    input  logic signed [7:0] feature_pixel,
+    input  logic signed [19:0] feature_pixel,
     input  logic        feature_valid,
     output logic        dense_done,
     output logic signed [19:0] logits [0:9]

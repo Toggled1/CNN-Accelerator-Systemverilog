@@ -14,6 +14,11 @@ module line_buffer (
     output logic signed [7:0] window [0:8]
 );
 
+    // Streaming protocol:
+    // - pixels arrive one-at-a-time on pixel_in/pixel_valid
+    // - the module buffers previous rows so a 3x3 receptive field can be assembled
+    // - once all nine pixels are available, window_valid is asserted and window[0:8]
+    //   contains the receptive field in the required row-major order
     // TODO: implement row buffering and window extraction logic.
     // TODO: ensure window ordering matches the model export contract.
 

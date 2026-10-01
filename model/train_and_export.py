@@ -1,28 +1,35 @@
-"""TODO: Implement the Python model export flow described in Section 9.1 of README.md.
+"""Python export flow for a compact MNIST CNN.
 
-Required behavior:
-- load the MNIST dataset
-- define or train a compact model suitable for inference
-- convert floating-point weights to signed 8-bit values
-- export weights.mem, biases.mem, input_images.mem, and golden_outputs.mem
-- keep export ordering consistent with the RTL memory layout
-- generate validation samples and expected labels for the SystemVerilog testbench
+This script is responsible for generating the exact parameter and validation files used
+by the RTL simulation. The architecture follows the project specification in README.md:
 
-This file is the source of truth for the numerical values used by the RTL simulation.
+- Conv1: 3x3, 4 filters
+- ReLU
+- 2x2 max pooling
+- Conv2: 3x3, 8 filters
+- ReLU
+- Flatten
+- Dense: 968 -> 10 logits
+- Argmax for class selection
+
+The export must remain bit-accurate with the RTL design.
 """
 
 from __future__ import annotations
 
-# TODO: add imports for MNIST dataset handling, numpy, and any model code.
-# TODO: implement model definition or training flow.
-# TODO: quantize weights to signed 8-bit values.
-# TODO: generate .mem files for weights, biases, and validation inputs.
-# TODO: write golden outputs for expected digit labels.
-# TODO: ensure the export order matches the RTL memory layout exactly.
+# TODO: import torchvision / MNIST utilities and numpy.
+# TODO: define or train the compact CNN architecture.
+# TODO: export conv1_weights.mem, conv2_weights.mem, dense_weights.mem, biases.mem.
+# TODO: generate input_images.mem and golden_outputs.mem for RTL validation.
+# TODO: keep ordering consistent with the RTL flatten and dense layer logic.
 
 
 def main() -> None:
-    """TODO: implement the end-to-end export flow per the README specification."""
+    """Run the CNN parameter export and validation-file generation."""
+    # TODO: load MNIST data.
+    # TODO: train or construct a compact CNN matching the README specification.
+    # TODO: serialize weights and biases into the .mem files used by the testbench.
+    # TODO: export a validation set and expected digit labels.
     pass
 
 

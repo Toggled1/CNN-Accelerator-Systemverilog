@@ -6,10 +6,12 @@
 
 module relu (
     input  logic signed [19:0] acc_in,
-    output logic signed [7:0]  relu_out
+    output logic signed [19:0] relu_out
 );
 
+    // ReLU is a scalar per-sample operation, not a neighborhood operation.
+    // It takes one activation value and applies: if < 0 then 0 else value.
     // TODO: implement the activation and clipping semantics defined in README.md.
-    // TODO: ensure the output type matches the fixed-point convention used by the model export.
+    // TODO: keep the ReLU output in the same 20-bit signed domain as the convolution accumulator.
 
 endmodule

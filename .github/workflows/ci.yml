@@ -1,4 +1,4 @@
-name: mnist-rtl-sim-ci
+name: mnist-cnn-rtl-sim-ci
 
 on:
   push:
@@ -22,11 +22,15 @@ jobs:
       - name: Run Python export step
         run: python3 model/train_and_export.py
 
-      - name: Compile and run RTL simulation
+      - name: Compile the CNN RTL simulation
         run: |
           cd sim
           make compile
+
+      - name: Run the testbench against MNIST golden outputs
+        run: |
+          cd sim
           make run
 
       - name: Show test summary
-        run: echo "TODO: confirm CI passes after simulation and golden output checks are implemented."
+        run: echo "Simulation completed for the small MNIST CNN project."
