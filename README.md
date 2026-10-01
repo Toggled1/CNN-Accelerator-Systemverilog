@@ -107,36 +107,53 @@ This is a real CNN structure with multiple learned stages rather than a single w
 
 The design uses signed fixed-point integer arithmetic to remain hardware-friendly and easy to validate.
 
-### 5.1 Bit widths
+### 5.1 Bit widths and fixed-point formats
 
-- raw MNIST pixel input: `logic [7:0]` (unsigned byte from the dataset, 0..255)
-- signed input sample used in the MAC path: `logic signed [7:0]`
-- convolution weight: `logic signed [7:0]`
-- bias value: `logic signed [19:0]`
-- accumulator result: `logic signed [19:0]`
-- ReLU activation output: `logic signed [19:0]`
-- class logit / score: `logic signed [19:0]`
-- final output digit index: `logic [3:0]`
+All fixed-point values are signed two's-complement integers. `Qm.n` below means `n` fractional bits; `m` counts the remaining integer bits, including the sign bit.
 
-### 5.2 Arithmetic conventions
+- raw MNIST pixel input: `logic [7:0]`, unsigned integer in 0..255
+- signed input sample: `logic signed [7:0]`, Q1.7
+- convolution and dense weights: `logic signed [7:0]`, Q1.7
+- biases: `logic signed [19:0]`, Q6.14
+- MAC accumulator: `logic signed [39:0]`, used for every convolution and dense dot product
+- ReLU activation and pooled value: `logic signed [19:0]`, Q6.14
+- class logit / score: `logic signed [19:0]`, Q6.14
+- final output digit index: `logic [3:0]`, with legal values 0..9
 
-- raw MNIST pixels are stored as unsigned 8-bit values; they are converted into the signed arithmetic domain before MAC operations
-- all weights and activations in the MAC path are treated as signed two's-complement values
-- the accumulator is widened to 20 bits to reduce overflow during MAC operations
-- ReLU is applied after convolutional outputs and preserves the 20-bit signed activation width
-- pooling is performed on positive activations after ReLU
-- dense-layer logits are 20-bit signed values before final argmax comparison
+The signed Q1.7 range is -1 through 127/128. The signed Q6.14 range is -32 through 524287/16384. These are the stored integer encodings; arithmetic must preserve the stated fractional-bit scale.
 
-### 5.3 Quantization strategy
+### 5.2 Input conversion and MAC arithmetic
 
-The Python training/export flow converts floating-point model values into fixed-point integer values for use in RTL simulation.
+The unsigned input byte is converted without signed reinterpretation:
 
-- raw input pixels are represented as 8-bit unsigned values from the dataset
-- signed input samples are converted to `logic signed [7:0]` before convolution arithmetic
-- weights are exported as signed 8-bit values
-- biases are exported as 20-bit signed values
-- activation outputs are clipped or limited according to the export convention used by the model
-- final logits remain signed 20-bit values until argmax selects the winning class
+```text
+sample_q7 = pixel_in[7:1]
+```
+
+This is the unsigned integer division `floor(pixel_in / 2)`, represented as signed Q1.7. Thus raw pixel 0 maps to 0, 127 maps to 63, 128 maps to 64, and 255 maps to 127. The value is zero-extended before it is treated as signed, so every converted input sample is nonnegative.
+
+Weights use Q1.7. Biases, stored activations, pooled values, and logits use Q6.14. Products and sums follow these rules:
+
+- Conv1 multiplies Q1.7 samples by Q1.7 weights, producing Q2.14 products. Sum the products and the Q6.14 bias in the 40-bit accumulator; both have 14 fractional bits, so no shift is needed before narrowing.
+- Conv2 and Dense multiply Q6.14 activations/features by Q1.7 weights, producing Q7.21 products. Add the Q6.14 bias shifted left by 7 to align it to Q7.21, and accumulate in 40 bits.
+- For Conv2 and Dense, arithmetic-right-shift the completed Q7.21 sum by 7. This is floor rounding for signed values and yields a Q6.14 integer encoding. Do not add a separate rounding constant.
+- After the scale conversion, saturate each convolution result to the signed 20-bit range before the ReLU stage. Saturation clamps to -524288 or 524287; it never wraps. Conv1 saturation uses its Q6.14 sum directly. Conv2 saturation follows the arithmetic right shift.
+- ReLU then maps a negative saturated convolution result to zero and passes a nonnegative value unchanged. Max-pooling compares these signed Q6.14 encodings and passes the selected value unchanged.
+- Dense uses the same Q7.21 product, bias alignment, 40-bit accumulation, arithmetic right shift, and signed 20-bit saturation. Dense logits are not passed through ReLU.
+
+The 40-bit accumulator is deliberately wider than the stored activation and logit values. With signed 20-bit features, signed 8-bit weights, at most 968 dense terms, and the aligned 20-bit bias, the worst-case sum fits in signed 40-bit range. All operands must be explicitly sign-extended to the accumulator width; do not rely on implicit SystemVerilog expression sizing.
+
+### 5.3 Parameter quantization and export
+
+The Python exporter uses the same fixed-point scales and limits as the RTL:
+
+- Convert each floating-point weight to signed Q1.7 by multiplying by 128, rounding to nearest with ties away from zero, and saturating to [-128, 127].
+- Convert each floating-point bias to signed Q6.14 by multiplying by 16384, rounding to nearest with ties away from zero, and saturating to [-524288, 524287].
+- Encode exported weights as signed 8-bit two's-complement values and biases as signed 20-bit two's-complement values. The text-file hex width and `$readmemh` representation must be specified consistently by the export implementation.
+- The input image remains unsigned 8-bit raw pixel data in its memory file; apply the Q1.7 conversion in the RTL datapath and in the integer reference, not in the input-file serializer.
+- The Python integer reference must reproduce each RTL product width, bias alignment, 40-bit accumulation, arithmetic shift, saturation, ReLU, and pooling operation exactly. Model quantization and inference must not depend on host-language overflow behavior.
+
+Parameter saturation is explicit: values outside the representable range clamp to the nearest endpoint. Activation/logit saturation is also explicit and never wraps. These rules are part of the Python-to-RTL numerical contract.
 
 ---
 
@@ -159,7 +176,7 @@ Behavior:
 
 - each output pixel is computed by sliding a 3x3 window over the input
 - each filter applies a unique set of 9 weights and one bias
-- output activations are accumulated in a 20-bit signed accumulator
+- output activations are accumulated in the 40-bit signed MAC accumulator defined in Section 5
 
 ### 6.2 ReLU layer 1
 
@@ -637,7 +654,7 @@ Required behavior:
 
 - accept a 28x28 input image window and generate 26x26x4 output activations
 - apply the set of weights and biases for each filter
-- accumulate 20-bit intermediate sums
+- accumulate intermediate sums in the 40-bit signed MAC accumulator defined in Section 5
 - output valid feature-map activations for the ReLU stage
 
 ### 9.6 `rtl/conv_layer_2.sv`
