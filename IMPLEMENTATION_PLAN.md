@@ -51,9 +51,9 @@ Implementation work must follow the exact quantization and conversion rules in R
 
 ### 3.2 Conv2 and intermediate tensor interface
 
-The README equation requires a 3 x 3 receptive field for each of four pooled input channels. Current `conv_layer_2.sv` exposes only `window[0:8]` of signed 8-bit values and eight 9-value filters, which cannot represent the documented equation or the documented 288 Conv2 weights.
+Status: resolved in `README.md` Sections 6.4, 7.1.3, and 9.6. `conv_layer_2.sv` accepts `window[0:35]` of signed Q6.14 samples and `filter_weights[0:7][0:35]` of signed Q1.7 weights. For each sample, `index = ch * 9 + ky * 3 + kx`, so channel is the outer ordering, followed by kernel row and column. Each accepted window is one complete 3 x 3 neighborhood across all four channels. The module registers all eight saturated Q6.14 pre-ReLU results and asserts `valid_out` for the following cycle. The image contains 121 such windows, presented in row-major output-location order. This preserves the README's 4 input channels, 8 output filters, 36 weights per filter, and total parameter count.
 
-Specify the RTL representation for all 36 samples in a Conv2 receptive field, their channel/kernel ordering, their width, and how each of eight filters obtains its 36 matching weights. Keep the documented equation and parameter count unless the README architecture is deliberately revised. The Conv2 input values must use the same width and scale as pooled Conv1 activations.
+Implementation must keep the explicit sample-to-weight index mapping and latency. Stage 3.3 still defines how pooling emits values and how the upstream window generator gathers those values into the 36-sample payload; Stage 3.4 still defines the complete pipeline handshake and stall behavior.
 
 ### 3.3 Pooling assembly and ordering
 

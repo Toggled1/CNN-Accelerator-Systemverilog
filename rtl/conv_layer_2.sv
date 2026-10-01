@@ -7,14 +7,15 @@ module conv_layer_2 (
     input  logic rst_n,
     input  logic enable,
     input  logic valid_in,
-    input  logic signed [7:0] window [0:8],
-    input  logic signed [7:0] filter_weights [0:7][0:8],
+    input  logic signed [19:0] window [0:35],
+    input  logic signed [7:0] filter_weights [0:7][0:35],
     input  logic signed [19:0] filter_biases [0:7],
     output logic valid_out,
     output logic signed [19:0] feature_map [0:7]
 );
 
-    // TODO: implement the second convolution stage for 8 output channels.
-    // TODO: align the data order with the flattened dense layer input.
+    // For channel ch and kernel position (ky, kx), the flat index is
+    // ch * 9 + ky * 3 + kx. Outputs are pre-ReLU and valid one cycle later.
+    // TODO: implement eight 36-term MACs using the Section 5 arithmetic rules.
 
 endmodule

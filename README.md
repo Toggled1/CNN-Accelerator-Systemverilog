@@ -211,6 +211,9 @@ Recommended configuration:
 - stride: 1
 - padding: valid
 - output size: 11 x 11 x 8
+- input samples: 36 signed Q6.14 values for one 3 x 3 window across four channels
+- weights: 8 filters x 36 signed Q1.7 values
+- output: eight signed Q6.14 values, one per filter, for each accepted spatial window
 
 ### 6.5 ReLU layer 2
 
@@ -386,6 +389,15 @@ For Conv2, for each filter `f2` and output location `(r, c)`:
 ```text
 out2[f2][r][c] = ReLU( sum_{ch=0..3} sum_{ky=0..2} sum_{kx=0..2} pooled[r+ky][c+kx][ch] * W2[f2][ch][ky][kx] + b2[f2] )
 ```
+
+In `conv_layer_2.sv`, one complete receptive field is represented by `window[0:35]`, and its weights by `filter_weights[0:7][0:35]`. The single flat position for channel `ch`, kernel row `ky`, and kernel column `kx` is `ch * 9 + ky * 3 + kx`:
+
+```text
+window[ch * 9 + ky * 3 + kx] = pooled[r + ky][c + kx][ch]
+filter_weights[f2][ch * 9 + ky * 3 + kx] = W2[f2][ch][ky][kx]
+```
+
+The channel-major, row-major, column-major order matches the Conv2 weight-file order defined below. `valid_in` qualifies one complete 36-value window. On a rising edge where `rst_n`, `enable`, and `valid_in` are all high, the module accepts that window; it registers all eight saturated Q6.14 MAC results together and asserts `valid_out` for the following cycle. It can accept one window per clock when enabled. The registered results are the pre-ReLU convolution values; the separate ReLU stage produces `out2` in the equation above. The window producer must provide exactly 121 windows per image, in row-major output-location order.
 
 For the dense output logits:
 
@@ -663,10 +675,12 @@ Purpose: compute the second learned feature map with 8 filters.
 
 Required behavior:
 
-- accept the output of the pooled first feature map
-- compute a second set of 3x3 convolutions
-- generate the second feature map corresponding to the learned intermediate representation
-- pass outputs to the second ReLU stage
+- accept one complete 3 x 3 window across all four pooled channels as 36 signed Q6.14 samples in `window[0:35]`
+- interpret sample index `ch * 9 + ky * 3 + kx` as channel-major then kernel row-major; use the same index for each filter's weights in `filter_weights[0:7][0:35]`
+- compute eight independent 36-term dot products, each with its matching signed Q1.7 weights and signed Q6.14 bias, using the Section 5 arithmetic contract
+- register eight saturated signed Q6.14 convolution values in `feature_map[0:7]`; these are pre-ReLU values
+- accept a window on a rising edge when `rst_n`, `enable`, and `valid_in` are high, then assert `valid_out` with the registered results in the following cycle; accept at most one window per cycle
+- process 121 valid windows per image in row-major output-location order, producing 11 x 11 x 8 values before the separate ReLU stage
 
 ### 9.7 `rtl/pooling_layer.sv`
 
