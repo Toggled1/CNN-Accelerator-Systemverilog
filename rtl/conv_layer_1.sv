@@ -1,6 +1,5 @@
 // First convolution stage for the MNIST CNN project.
-// Architecture: 28x28x1 input -> 26x26x4 output
-// This is a compact hardware-oriented skeleton representing the first layer of the CNN.
+// Architecture: 28x28x1 input -> 26x26x4 pre-ReLU output
 
 module conv_layer_1 (
     input  logic clk,
@@ -16,6 +15,6 @@ module conv_layer_1 (
 
     // TODO: implement 3x3 sliding-window convolution for each of the 4 filters.
     // TODO: generate one output activation per filter from the current receptive field.
-    // TODO: keep 20-bit accumulator precision aligned with README.md.
+    // TODO: use the 40-bit MAC accumulator and 20-bit saturated output from Section 5.
 
 endmodule

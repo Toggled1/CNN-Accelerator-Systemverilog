@@ -1,7 +1,7 @@
 // TODO: implement the sliding 3x3 window generator from README.md Section 9.4.
 // Required behavior:
 // - maintain enough image history for a 3x3 receptive field
-// - output nine pixels on valid cycles
+// - output nine signed Q1.7 samples in row-major order
 // - keep window_valid asserted only when enough data is available
 
 module line_buffer (
@@ -14,11 +14,9 @@ module line_buffer (
     output logic signed [7:0] window [0:8]
 );
 
-    // Streaming protocol:
-    // - pixels arrive one-at-a-time on pixel_in/pixel_valid
-    // - the module buffers previous rows so a 3x3 receptive field can be assembled
-    // - once all nine pixels are available, window_valid is asserted and window[0:8]
-    //   contains the receptive field in the required row-major order
+    // During CONV1, accept a pixel on each rising edge with pixel_valid high.
+    // After accepting a pixel that completes a window, present window[0:8] in
+    // row-major Q1.7 order and assert window_valid for the following cycle.
     // TODO: implement row buffering and window extraction logic.
     // TODO: ensure window ordering matches the model export contract.
 

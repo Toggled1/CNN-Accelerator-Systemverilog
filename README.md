@@ -361,6 +361,7 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 #### Internal transfers and buffering
 
 - For a module with both `valid_in` and `enable`, an input transfer occurs on a rising edge when both are high. Modules without `enable` use their documented valid signal only while the FSM is in the owning state: `line_buffer` consumes image-buffer pixels on `pixel_valid`, `flatten_layer` consumes channel vectors on `valid_in`, and `dense_layer` consumes features on `feature_valid` after `start_dense`.
+- The top-level `pixel_valid` is only the host-to-image-buffer qualifier in `LOAD_IMAGE`. During `CONV1`, the top-level reads the stored image with a separate internal `image_read_valid` signal connected to the line-buffer instance's `pixel_valid` port; host `pixel_valid` is ignored while `ready` is low.
 - There is no internal `ready` or backpressure. A disabled stage does not consume its input; its source buffer keeps that item available. The FSM activates a stage only when its input exists and its fixed destination buffer has capacity.
 - A registered stage presents `valid_out` for one cycle with the result available during that cycle. The controller captures the result on the rising edge at the end of the valid cycle. Each stage's latency and result counts are fixed by its module contract; the FSM transitions based on captured item counts, not a guessed delay.
 - All counters advance only on the stated transfer or output-valid event. Each stage completes only at the specified item count; no stage transition is based on a guessed fixed delay.
@@ -371,8 +372,9 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 
 | Boundary | Transfer condition | Payload and completion |
 |---|---|---|
+| Reset | `rst_n` is asserted low at any time. | Asynchronously abort the transaction; clear FSM state, counters, `ready`, `done`, and registered valid flags. Reset window history and Dense accumulators. Full image/feature/flatten arrays and immutable initialized parameter arrays are not reset; they are not consumed until overwritten/valid, or until parameters have passed the pre-inference known-value check. ReLU and Argmax are combinational and have no reset. |
 | Host to image buffer | Rising edge with `pixel_valid && ready` in `LOAD_IMAGE`. | One unsigned pixel; 784 accepted pixels complete the image. |
-| Image buffer to line buffer | On entry to `CONV1`, pulse FSM output `clear_window` for one cycle; then assert line-buffer `pixel_valid` for each buffered pixel. | One raw pixel per cycle; the line buffer emits one row-major Q1.7 3 x 3 window whenever `window_valid` is high, 676 windows total. `clear_window` has priority and consumes no pixel. |
+| Image buffer to line buffer | On entry to `CONV1`, pulse FSM output `clear_window` for one cycle; then assert internal `image_read_valid` for each buffered pixel. Connect this signal to the line-buffer instance's `pixel_valid` port. | One raw pixel per cycle; the line buffer emits one row-major Q1.7 3 x 3 window whenever `window_valid` is high, 676 windows total. `clear_window` has priority and consumes no pixel. |
 | Line buffer to Conv1 | Rising edge with `window_valid && enable_conv1`. | One signed Q1.7 window of nine values. Conv1 emits 676 four-value results using `valid_out`. |
 | Conv1 map to ReLU1 | One location vector per cycle during `RELU1`; no registered handshake. | Four signed Q6.14 values per location; all four are ReLU-processed in parallel and written back in place. |
 | ReLU1 map to pool block / Pool | Rising edge with pooling `valid_in && enable`. | One complete same-channel four-value block; pooling emits one scalar with `valid_out`, 676 scalars total. |
@@ -452,8 +454,10 @@ This means:
 
 For Conv1, for each filter `f` and output location `(r, c)`, the convolution module produces a saturated pre-ReLU value, then the separate ReLU stage produces `out1`:
 
+`image_q7[r][c]` is the signed Q1.7 sample made from the raw byte at image coordinate `(r,c)` using `sample_q7 = pixel_in[7:1]` from Section 5.2.
+
 ```text
-conv1_pre_relu[f][r][c] = saturate20( sum_{ky=0..2} sum_{kx=0..2} input[r+ky][c+kx] * W1[f][ky][kx] + b1[f] )
+conv1_pre_relu[f][r][c] = saturate20( sum_{ky=0..2} sum_{kx=0..2} image_q7[r+ky][c+kx] * W1[f][ky][kx] + b1[f] )
 out1[f][r][c] = max(0, conv1_pre_relu[f][r][c])
 ```
 
@@ -762,9 +766,9 @@ Purpose: maintain enough image history to generate the 3x3 sliding window for co
 Required behavior:
 
 - keep previous rows required for a local 3x3 neighborhood
-- accept one input pixel whenever `pixel_valid` is high during `CONV1`; `clear` has priority and resets row/column history before the scan
+- accept one input pixel on each rising edge where `pixel_valid` is high during `CONV1`; `clear` has priority on a rising edge and resets row/column history without accepting a pixel
 - convert each raw unsigned pixel to signed Q1.7 using the Section 5 rule before placing it in a window
-- output nine signed Q1.7 samples in row-major window order with `window_valid` for each complete window
+- after the rising edge accepting the pixel that completes a window, present its nine signed Q1.7 samples in row-major order and assert `window_valid` for the following cycle; consecutive valid cycles represent consecutive windows
 - emit exactly 676 valid windows from one 28 x 28 image; no window may cross a row boundary
 
 ---
@@ -775,11 +779,11 @@ Purpose: compute the first feature map using a 3x3 kernel and 4 filters.
 
 Required behavior:
 
-- accept a 28x28 input image window and generate 26x26x4 output activations
+- accept one valid 3 x 3 Q1.7 image window at a time; across 676 row-major windows, generate the 26 x 26 x 4 pre-ReLU feature map
 - apply the set of weights and biases for each filter
 - accumulate intermediate sums in the 40-bit signed MAC accumulator defined in Section 5
 - accept each valid window when `valid_in && enable` is true on a rising edge
-- register all four pre-ReLU signed Q6.14 filter results for that location and assert `valid_out` for one cycle with the vector
+- on the accepting rising edge, register all four pre-ReLU signed Q6.14 filter results for that location; present the vector and assert `valid_out` for the following cycle
 - produce exactly 676 four-value vectors, in row-major output-location order
 
 ### 9.6 `rtl/conv_layer_2.sv`
@@ -834,7 +838,7 @@ Required behavior:
 - maintain deterministic ordering between software export and hardware flattening
 - accept one eight-channel Conv2 vector per spatial location in row-major location order during `FLATTEN`
 - write `feature_data[ch]` for location `(r,c)` to `flattened_vector[ch * 121 + r * 11 + c]`
-- advance the input location count only on a rising edge with `valid_in` high; after 121 accepted vectors, assert `valid_out` for one cycle and expose the complete 968-value channel-major vector
+- advance the input location count only on a rising edge with `valid_in` high; after the edge accepting vector 121, assert `valid_out` for the following cycle with the complete 968-value channel-major vector
 - hold the completed vector stable throughout `DENSE`; reset clears the input count and `valid_out`
 
 ---
@@ -850,7 +854,9 @@ Required behavior:
 - compute the dot product for each class
 - `start_dense` initializes the ten accumulators; accept flat indices 0..967 sequentially when `feature_valid` is high
 - for each accepted flat index `i`, use `dense_weights[class][i]` for each class and add `dense_biases[class]` at initialization, following Section 5 arithmetic
-- after the final accepted feature and all parameter operations complete, register `logits[0:9]` and assert `dense_done` for one cycle
+- keep `feature_valid` low on the rising edge that accepts `start_dense`; then hold each feature until its rising edge with `feature_valid` high
+- on the rising edge accepting feature index 967, register all ten final saturated Q6.14 logits and assert `dense_done` for the following cycle
+- keep logits stable after `dense_done` until reset or the next `start_dense`
 
 ---
 
@@ -895,7 +901,7 @@ The testbench must:
 6. wait until `done` is asserted and require `predicted_digit` to be in 0..9
 7. compare `predicted_digit` exactly against the integer-reference prediction in `golden_outputs.mem`
 8. separately compare `predicted_digit` against the ground-truth label in `labels.mem`
-9. report reference agreement and classification accuracy separately
+9. report reference agreement and classification accuracy separately; fail if fewer than 90 of the 100 labels are classified correctly
 10. finish with `$finish;`
 
 ---
@@ -932,12 +938,13 @@ This ordering must be reflected exactly in Python serialization and the typed-ar
 - `input_images.mem` contains 100 consecutive image blocks of 784 unsigned raw pixels each, row-major within each image. Each pixel is exactly two hexadecimal digits.
 - `golden_outputs.mem` contains 100 one-digit hexadecimal class indices, one per image, generated by the Python fixed-point integer reference from the same exported parameters and image data. These are reference predictions, not MNIST labels.
 - `labels.mem` contains the 100 corresponding MNIST ground-truth class indices, one one-digit hexadecimal value per image, in exactly the same order as the input images.
-- Both output files contain one value per line and no comments. A mismatch between RTL and `golden_outputs.mem` fails simulation. Classification accuracy is computed separately against `labels.mem` and reported as `correct / 100`; no minimum accuracy threshold is imposed by this simulation contract.
+- Both output files contain one value per line and no comments. A mismatch between RTL and `golden_outputs.mem` fails simulation. Classification accuracy is computed separately against `labels.mem` and reported as `correct / 100`; at least 90 of 100 must be correct to meet the project classification goal.
 - The end-to-end interface exposes only the predicted digit, so end-to-end equivalence compares that index to the integer-reference index. Focused Dense tests compare all ten logits exactly against directed integer-reference cases.
 
 #### Training and fixture reproducibility
 
 - Train on the official 60,000-image MNIST training split, with no data augmentation. Use the architecture in this README, CPU execution, 5 epochs, batch size 64, Adam with learning rate 0.001, and cross-entropy loss.
+- Before training or floating-point reference inference, transform each raw pixel byte `p` to `((p >> 1) / 128.0)`. This exactly matches the RTL Q1.7 input conversion; do not use `/255`, mean subtraction, or standard-deviation normalization.
 - Set Python, NumPy, and PyTorch seeds to 2026; use a seeded data-loader generator, `num_workers=0`, and deterministic PyTorch algorithms. Pin the package versions used to generate the committed fixture set when the exporter is implemented.
 - Training and fixture regeneration are explicit maintenance operations. A regeneration updates all parameter files, images, reference predictions, and labels as one set. Routine simulation and CI use the committed `.mem` fixture set and do not train or download MNIST.
 
@@ -973,7 +980,7 @@ The expected behavior is:
 - print exact-reference agreement and classification accuracy as separate results
 - allow waveform inspection for debugging
 
-The GitHub Actions regression skips the optional training/export command. It does not download MNIST; it tests the committed deterministic fixtures.
+The intended GitHub Actions regression skips the optional training/export command and uses committed fixtures without downloading MNIST. The current Makefile compile/run targets and testbench are still TODO scaffolds, so CI does not yet perform a functional RTL/reference or accuracy check; Phase 1 and the later RTL/testbench phases must implement those checks before a passing workflow is meaningful.
 
 ---
 
@@ -984,7 +991,7 @@ The design is considered complete only when:
 - all CNN RTL modules compile
 - the testbench loads the correct memory files
 - every RTL prediction matches the fixed-point Python reference prediction
-- classification accuracy is reported against the separate MNIST ground-truth labels
+- classification accuracy is reported against the separate MNIST ground-truth labels and reaches at least 90/100 on the frozen balanced subset
 - the simulation completes without signal timing errors
 - the repository remains clear and readable for future review
 
@@ -1020,7 +1027,7 @@ The final repository should include:
 
 - Python export script for CNN weights and biases
 - RTL implementation for a small CNN classifier
-- testbench that loads validation data and golden outputs
+- testbench that loads validation inputs, fixed-point reference predictions, and ground-truth labels
 - compiled simulation flow and waveform support
 - project documentation that explains the network operation clearly
 

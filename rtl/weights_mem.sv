@@ -1,4 +1,4 @@
-// TODO: implement the model parameter memory described in README.md Section 9.9.
+// TODO: implement the typed parameter arrays described in README.md Section 9.12.
 // Required behavior:
 // - initialize weights and biases from exported .mem files
 // - keep memory layout consistent with the Python export order

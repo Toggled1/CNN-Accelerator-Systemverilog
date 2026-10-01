@@ -16,10 +16,10 @@ The current workspace contains the following project components:
 - `model/requirements.txt`: lists NumPy, PyTorch, and Torchvision, with an unfinished comment for any additional dependencies.
 - `rtl/`: top-level, control FSM, line buffer, Conv1, Conv2, pooling, ReLU, flatten, dense, argmax, and parameter-memory scaffolds. These are not functioning implementations.
 - `tb/tb_top.sv`: a TODO testbench that currently terminates immediately.
-- `tb/test_vectors/*.mem`: placeholder text, not usable numeric model or input data.
+- `tb/test_vectors/`: six placeholder `.mem` files, not usable numeric model/input data; the required `labels.mem` file is not present yet and must be generated with the other Phase 3 fixtures.
 - `sim/Makefile`: target names and source lists exist, but compile/run/wave commands are TODOs.
 - `sim/run_sim.sh`: invokes the Makefile targets.
-- `.github/workflows/ci.yml`: intends to install Icarus/Python dependencies, run export, compile, and simulate, but the required flows are not implemented.
+- `.github/workflows/ci.yml`: installs Icarus and invokes compile/run without training or downloading MNIST. Because the Make targets and testbench are TODOs, it does not yet perform a functional simulation or accuracy check.
 - `sim/wave_config.gtkw`: placeholder only.
 - `LICENSE`: TODO placeholder; public licensing remains optional per the README.
 
@@ -65,7 +65,7 @@ Implementation must preserve this block mapping, order, and latency. Stage 3.4 d
 
 Status: resolved in `README.md` Sections 7.1, 7.1.7, 7.4, 9.2, and 9.3. The top-level accepts `start` only in `IDLE`, then accepts exactly 784 row-major unsigned pixels using `pixel_valid && ready` while in `LOAD_IMAGE`. Pixel-valid gaps pause input counting. `ready` is low during compute and after the final pixel. Reset is active-low asynchronous and aborts the current transaction; `done` is a one-cycle pulse in `DONE`, after which the FSM returns to `IDLE`.
 
-The FSM processes one stage at a time in the specified state order, using the fixed-size image/interstage buffers and capacities listed in README Section 7.4. At the external image input, a pixel transfers on rising-edge `pixel_valid && ready`. Internally, modules with `valid_in` and `enable` accept on rising-edge `valid_in && enable`; the line buffer consumes buffered pixels on `pixel_valid` during `CONV1`, Flatten consumes `valid_in` during `FLATTEN`, and Dense consumes `feature_valid` after `start_dense` during `DENSE`. The FSM exposes enables for Conv1, ReLU1, Pool, Conv2, ReLU2, Flatten, and Dense, plus a one-cycle `start_dense` pulse and a `flatten_done` input. There are no internal ready signals or backpressure. Disabled stages do not consume input, and source buffers retain items until use. `clear_window` pulses on entry to both Conv1 and Conv2 scans and takes priority over input consumption. Registered modules pulse `valid_out` with each result, and the controller counts captured outputs; stage changes depend on exact item counts rather than guessed delays. ReLU is combinational across a channel vector. Flatten publishes completion only after its full channel-major 968-value vector is ready; Dense signals completion with `dense_done` after producing all logits.
+The FSM processes one stage at a time in the specified state order, using the fixed-size image/interstage buffers and capacities listed in README Section 7.4. At the external image input, a pixel transfers on rising-edge `pixel_valid && ready`. Internally, modules with `valid_in` and `enable` accept on rising-edge `valid_in && enable`; the top-level reads buffered pixels through internal `image_read_valid` during `CONV1`, Flatten consumes `valid_in` during `FLATTEN`, and Dense consumes `feature_valid` after `start_dense` during `DENSE`. The FSM exposes enables for Conv1, ReLU1, Pool, Conv2, ReLU2, Flatten, and Dense, plus a one-cycle `start_dense` pulse and a `flatten_done` input. There are no internal ready signals or backpressure. Disabled stages do not consume input, and source buffers retain items until use. `clear_window` pulses on entry to both Conv1 and Conv2 scans and takes priority over input consumption. Registered modules pulse `valid_out` with each result, and the controller counts captured outputs; stage changes depend on exact item counts rather than guessed delays. ReLU is combinational across a channel vector. Flatten publishes completion only after its full channel-major 968-value vector is ready; Dense signals completion with `dense_done` after producing all logits.
 
 Implementation must follow the README buffer capacities, payload granularity, output counts, reset/start/done lifecycle, and no-backpressure rule. Do not convert the design into a concurrent elastic pipeline without revising the canonical specification and verification plan.
 
@@ -83,9 +83,9 @@ The files contain 36 signed 8-bit Conv1 weights, 288 signed 8-bit Conv2 weights,
 
 ### 3.7 Golden outputs and reproducibility
 
-Status: resolved in `README.md` Sections 9.1, 9.13, 10.3, 11, and 12. `golden_outputs.mem` stores the quantized integer reference's predicted class index, while the new `labels.mem` stores MNIST ground-truth labels. The testbench compares each RTL prediction exactly to the reference prediction, then separately counts correctness against labels. It reports both reference agreement and top-1 accuracy; accuracy has no pass/fail threshold. Dense unit tests compare all ten logits exactly.
+Status: resolved in `README.md` Sections 9.1, 9.13, 10.3, 11, and 12. `golden_outputs.mem` stores the quantized integer reference's predicted class index, while `labels.mem` stores MNIST ground-truth labels. The testbench compares each RTL prediction exactly to the reference prediction, then separately counts correctness against labels. It reports both reference agreement and top-1 accuracy, and requires at least 90/100 correct on the balanced subset. Dense unit tests compare all ten logits exactly.
 
-Fixtures contain 100 official MNIST test examples: the first ten examples of each class, selected in canonical test-set order and stored class-major. Regeneration trains on the official 60,000-image training split with the fixed README CPU/seed/training policy, then regenerates parameters, inputs, integer-reference predictions, and labels together. CI uses the committed fixture set and never trains or downloads MNIST. Implementation and test work remains in Phases 3, 4, 6, and 7.
+Fixtures contain 100 official MNIST test examples: the first ten examples of each class, selected in canonical test-set order and stored class-major. Training and floating-point reference inference convert each raw pixel `p` to `((p >> 1) / 128.0)`, matching RTL input conversion. Regeneration trains on the official 60,000-image training split with the fixed README CPU/seed/training policy, then regenerates parameters, inputs, integer-reference predictions, and labels together. CI uses the committed fixture set and never trains or downloads MNIST. Implementation and test work remains in Phases 3, 4, 6, and 7.
 
 ### 3.8 Tie behavior and invalid cases
 
@@ -94,6 +94,8 @@ Status: resolved in `README.md` Sections 7.4, 9.11, 9.12, and 9.13. Argmax is co
 Unknown logits have no defined prediction. The testbench must fail if any logit is X/Z when `dense_done` is asserted. It must also confirm that all entries in the six typed parameter arrays are known before the first inference; offline fixture checks enforce exact file counts, and no inference may start after a failed initialization check. The fixed-size arrays have no runtime address port; all layer indices must stay within their documented ranges.
 
 ### 3.9 Phase 0 exit criteria
+
+Status: PASS for the specification freeze. The audit confirmed that Sections 3.1–3.8 have concrete README decisions; the equations, Q formats, tensor/file orderings, FSM ports, per-boundary payloads, valid timing, reset behavior, and completion conditions agree. This pass confirms specification consistency only; it does not claim the RTL logic, exporter, fixtures, or testbench are implemented or functionally verified.
 
 Phase 0 is complete only when:
 
@@ -120,12 +122,12 @@ Exit criteria: clean checkout can compile and run the smallest test, and an inte
 
 Do not train/export weights until Phase 0 fixes arithmetic and data semantics.
 
-1. Implement `model/mnist_model.py` with the exact README topology: Conv1 1->4, 3 x 3 valid; ReLU; 2 x 2 max-pool stride 2; Conv2 4->8, 3 x 3 valid; ReLU; flatten to 968 in the frozen order; dense 968->10. Use PyTorch modules or an equivalent explicitly documented implementation consistent with current dependencies.
+1. Implement `model/mnist_model.py` with the exact README topology: Conv1 1->4, 3 x 3 valid; ReLU; 2 x 2 max-pool stride 2; Conv2 4->8, 3 x 3 valid; ReLU; flatten to 968 in the frozen order; dense 968->10. Feed raw MNIST bytes through `((pixel >> 1) / 128.0)` to match the RTL Q1.7 conversion exactly. Use PyTorch modules or an equivalent explicitly documented implementation consistent with current dependencies.
 2. Add shape checks for a batch of 28 x 28 images at every boundary: 26 x 26 x 4, 13 x 13 x 4, 11 x 11 x 8, 968, and 10. Make layout conversions explicit so framework channel order cannot silently differ from the RTL convention.
 3. Implement reproducible initialization/training in `train_and_export.py`: fixed seeds, documented training/validation split, explicit model save/load behavior, and no hidden training during RTL compilation.
 4. Implement a bit-accurate integer inference reference that follows the frozen RTL arithmetic step by step, including signed operations, bias addition, intermediate narrowing, rounding, clipping/saturation, and wrap behavior if any. Keep this separate and testable from floating-point model inference.
 5. Add tests for quantization boundary values and arithmetic boundaries, including negative products, maximum/minimum representable values, rounding ties, and saturation/overflow behavior selected in Phase 0.
-6. Compare the integer reference against the quantized PyTorch model on a small set of samples. Any acceptable difference must be explicitly explained by the chosen quantization contract; do not conceal mismatch with a loose tolerance.
+6. Compare the integer reference against the quantized PyTorch model on a small set of samples. Any acceptable difference must be explicitly explained by the chosen quantization contract; do not conceal mismatch with a loose tolerance. Evaluate the frozen balanced 100-image test subset and require at least 90 correct predictions against labels.
 
 Exit criteria: shapes are exact, reruns with the same seed/persisted checkpoint are reproducible, and the Python integer reference produces deterministic intermediate tensors, logits, and class indices.
 
@@ -135,7 +137,7 @@ Exit criteria: shapes are exact, reruns with the same seed/persisted checkpoint 
 2. Serialize each parameter array using the exact README per-file index/order contract: Conv1 filter then kernel row/column; Conv2 output filter then input channel then kernel row/column; Dense class then input index; biases in Conv1, Conv2, Dense order. Emit exactly one scalar per line, with two hex digits for weights and five for biases.
 3. Implement the exporter to produce the four parameter files, `input_images.mem`, reference-prediction `golden_outputs.mem`, and ground-truth `labels.mem` as one fixture set. Never leave comments or placeholder strings in a file intended for `$readmemh`.
 4. Select exactly the first ten examples of each class from the canonical MNIST test split, preserving their original order within each class and writing classes in digit order. Train using the CPU/seed/5-epoch policy fixed in README Section 10.3. Regeneration is explicit; routine simulation and CI never train or download MNIST.
-5. Validate generated data before writing: expected parameter counts (36, 288, 9,680 weights; 4, 8, 10 biases), legal ranges, exactly 100 images of 784 pixels, exactly 100 reference predictions and labels in 0..9, and identical sample ordering across the three validation files.
+5. Validate generated data before writing: expected parameter counts (36, 288, 9,680 weights; 4, 8, 10 biases), legal ranges, exactly 100 images of 784 pixels, exactly 100 reference predictions and labels in 0..9, identical sample ordering across the three validation files, and at least 90/100 quantized-reference predictions matching ground truth.
 6. Write files atomically or fail without leaving partially overwritten fixtures. Print concise counts and paths so CI logs can diagnose export failures.
 7. Add Python tests for serializer round trips, signed boundary encodings, ordering with index-coded arrays, counts, and malformed/range-invalid inputs.
 
@@ -143,14 +145,14 @@ Exit criteria: export creates valid files with exact counts and deterministic co
 
 ## 7. Phase 4: Build the RTL from Small, Independent Modules Upward
 
-Create focused testbenches under `tb/` for modules with meaningful state or arithmetic. Keep the full `tb/tb_top.sv` for integration. Each unit test must use small hand-calculated vectors and check data, valid timing, reset, and stalls according to the frozen protocol.
+Create focused testbenches under `tb/` for modules with meaningful state or arithmetic. Keep the full `tb/tb_top.sv` for integration. Each unit test must use small hand-calculated vectors and check data, valid timing, reset, and invalid-input gaps or host pauses where the frozen interface permits them. Internal stages do not support downstream stalls.
 
 ### 7.1 Argmax and ReLU
 
 Implement `rtl/argmax.sv` and `rtl/relu.sv` first because their behavior is small and isolates signedness.
 
 - Argmax compares all ten logits as signed values, returns 0..9, and updates only on strict `>` so ties retain the lowest index. Test each class as the unique maximum, all-negative logits, ties at several indices, and signed boundary values. Verify the top samples the result only while `dense_done` is high, and make the integration test fail on unknown logits at that event.
-- ReLU maps negative signed input to zero and preserves nonnegative input exactly unless Phase 0 explicitly specifies a requantization/clipping function. Test zero, negative one, minimum, positive one, and maximum.
+- ReLU maps negative signed Q6.14 input to zero and passes every nonnegative value through unchanged; it does not requantize or clip. Test zero, negative one, minimum, positive one, and maximum.
 
 Exit criteria: their unit tests pass without unknown outputs after reset/settling, with all comparisons explicitly signed.
 
@@ -249,7 +251,7 @@ Implement `tb/tb_top.sv` after the top-level interface is stable.
 3. For each selected image, start one inference and send each of 784 unsigned pixels in row-major order according to `pixel_valid`/`ready`. Hold a pixel and valid asserted until accepted if the frozen handshake requires it.
 4. Apply a configurable timeout per inference and fail if `done` is absent, early, repeated, or accompanied by an invalid prediction. On internal `dense_done`, assert all ten logits are known before the top captures Argmax; when `done` is high, require `predicted_digit` in 0..9.
 5. Compare every RTL predicted digit exactly against the integer-reference index in `golden_outputs.mem`. Separately score it against `labels.mem`; do not confuse reference agreement with classification accuracy. Focused Dense tests compare all ten logits against the integer reference.
-6. Report sample count, reference match count, number correct against labels, and accuracy. Any mismatch against reference predictions causes `$fatal` or a nonzero simulator exit so Make and CI fail; accuracy is reported without a minimum threshold.
+6. Report sample count, reference match count, number correct against labels, and accuracy. Any mismatch against reference predictions or fewer than 90 correct labels causes `$fatal` or a nonzero simulator exit so Make and CI fail.
 7. Run multiple images in one simulator session to verify reset/clear/restart behavior and prove there is no cross-image state leakage.
 
 Exit criteria: directed arithmetic tests, exported fixture checks, and end-to-end equivalence all pass; validation accuracy is reported according to the README criterion.

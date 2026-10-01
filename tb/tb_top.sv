@@ -7,7 +7,7 @@
 // - fail if any parameter is unknown before inference or any logit is unknown at dense_done
 // - compare predicted_digit exactly against the integer-reference prediction
 // - separately compare predicted_digit against the MNIST ground-truth label
-// - report reference agreement and classification accuracy separately
+// - report reference agreement and classification accuracy separately; fail below 90/100
 // - finish simulation with $finish;
 
 module tb_top;
@@ -25,11 +25,11 @@ module tb_top;
     // TODO: generate a 100 MHz clock or the required testbench clock frequency.
     // TODO: implement reset and input vector loading logic.
     // TODO: compare output against reference predictions and labels separately.
-    // TODO: report exact-reference agreement and classification accuracy.
+    // TODO: report exact-reference agreement and classification accuracy; enforce the 90/100 floor.
 
     initial begin
         // TODO: initialize simulation state.
-        $display("TODO: implement the testbench per README.md Section 9.10.");
+        $display("TODO: implement the testbench per README.md Section 9.13.");
         $finish;
     end
 

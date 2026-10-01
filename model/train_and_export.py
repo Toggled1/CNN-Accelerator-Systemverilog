@@ -20,7 +20,8 @@ from __future__ import annotations
 # TODO: import torchvision / MNIST utilities and numpy.
 # TODO: define or train the compact CNN architecture.
 # TODO: export conv1_weights.mem, conv2_weights.mem, dense_weights.mem, biases.mem.
-# TODO: generate input_images.mem and golden_outputs.mem for RTL validation.
+# TODO: generate input_images.mem, reference-prediction golden_outputs.mem, and ground-truth labels.mem.
+# TODO: apply the README Q1.7-matching raw-pixel transform for floating-point training/inference.
 # TODO: keep ordering consistent with the RTL flatten and dense layer logic.
 
 
@@ -29,7 +30,7 @@ def main() -> None:
     # TODO: load MNIST data.
     # TODO: train or construct a compact CNN matching the README specification.
     # TODO: serialize weights and biases into the .mem files used by the testbench.
-    # TODO: export a validation set and expected digit labels.
+    # TODO: export the fixed 100-image subset, integer-reference predictions, and separate labels.
     pass
 
 

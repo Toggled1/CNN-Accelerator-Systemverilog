@@ -15,4 +15,4 @@ make -C sim compile
 # Execute the simulation and validate predictions against golden outputs.
 make -C sim run
 
-echo "MNIST CNN simulation workflow completed."
+echo "Simulation targets returned; functional RTL verification remains TODO."

@@ -1,4 +1,4 @@
-// TODO: implement the dense score calculation described in README.md Section 9.7.
+// TODO: implement the dense score calculation described in README.md Section 9.10.
 // Required behavior:
 // - consume flattened feature values in sequence
 // - compute dot products for all 10 classes

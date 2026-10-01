@@ -17,15 +17,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y iverilog
 
-      - name: Compile the CNN RTL simulation
+      - name: Invoke current compile target (scaffold)
         run: |
           cd sim
           make compile
 
-      - name: Run the testbench against committed fixtures
+      - name: Invoke current run target (scaffold)
         run: |
           cd sim
           make run
 
-      - name: Show test summary
-        run: echo "RTL/reference agreement and MNIST accuracy checks completed."
+      - name: Report scaffold status
+        run: echo "Workflow commands returned; functional RTL/reference and accuracy checks remain TODO."
