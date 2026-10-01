@@ -372,11 +372,11 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 | Boundary | Transfer condition | Payload and completion |
 |---|---|---|
 | Host to image buffer | Rising edge with `pixel_valid && ready` in `LOAD_IMAGE`. | One unsigned pixel; 784 accepted pixels complete the image. |
-| Image buffer to line buffer | In `CONV1`, pulse `clear` for one cycle before scanning; then assert the line-buffer `pixel_valid` for each buffered pixel. | One raw pixel per cycle; the line buffer emits one row-major Q1.7 3 x 3 window whenever `window_valid` is high, 676 windows total. `clear` has priority and consumes no pixel. |
+| Image buffer to line buffer | On entry to `CONV1`, pulse FSM output `clear_window` for one cycle; then assert line-buffer `pixel_valid` for each buffered pixel. | One raw pixel per cycle; the line buffer emits one row-major Q1.7 3 x 3 window whenever `window_valid` is high, 676 windows total. `clear_window` has priority and consumes no pixel. |
 | Line buffer to Conv1 | Rising edge with `window_valid && enable_conv1`. | One signed Q1.7 window of nine values. Conv1 emits 676 four-value results using `valid_out`. |
 | Conv1 map to ReLU1 | One location vector per cycle during `RELU1`; no registered handshake. | Four signed Q6.14 values per location; all four are ReLU-processed in parallel and written back in place. |
 | ReLU1 map to pool block / Pool | Rising edge with pooling `valid_in && enable`. | One complete same-channel four-value block; pooling emits one scalar with `valid_out`, 676 scalars total. |
-| Pooled map to Conv2 | On entry to `CONV2`, reset the window-source row/column counters to zero. Assert internal `conv2_window_valid` for each complete window; Conv2 accepts on `conv2_window_valid && enable_conv2`. | One signed Q6.14 window of 36 values; Conv2 emits eight signed Q6.14 values with `valid_out`, 121 vectors total. |
+| Pooled map to Conv2 | On entry to `CONV2`, pulse `clear_window` to reset the Conv2 window-source row/column counters to zero. Assert internal `conv2_window_valid` for each complete window; Conv2 accepts on `conv2_window_valid && enable_conv2`. | One signed Q6.14 window of 36 values; Conv2 emits eight signed Q6.14 values with `valid_out`, 121 vectors total. |
 | Conv2 map to ReLU2 | One location vector per cycle during `RELU2`; no registered handshake. | Eight signed Q6.14 values per location; all eight are ReLU-processed in parallel and written back in place. |
 | Conv2 map to Flatten | Rising edge with Flatten `valid_in` during `FLATTEN`; spatial vectors arrive row-major. | `feature_data[ch]` for the current `(r,c)` is stored at `flattened_vector[ch * 121 + r * 11 + c]`. After 121 accepted vectors, `valid_out` pulses once for the complete 968-value array, which remains stable through `DENSE`. |
 | Flatten vector to Dense | Pulse `start_dense` on the first `DENSE` cycle while `feature_valid` is low; then assert `feature_valid` once for each flat index 0..967. | One signed Q6.14 feature per valid cycle. Dense asserts `dense_done` once all ten logits are final. |
@@ -391,10 +391,10 @@ FSM order: `IDLE -> LOAD_IMAGE -> CONV1 -> RELU1 -> POOL -> CONV2 -> RELU2 -> FL
 | State | Input and processing order | Completed output |
 |---|---|---|
 | `LOAD_IMAGE` | Accept 784 unsigned bytes in row-major order into the image buffer. | One complete 28 x 28 image. |
-| `CONV1` | Clear the line buffer, then read all 784 image bytes one per cycle through it. It converts pixels to Q1.7 and emits each complete row-major 3 x 3 window with `window_valid`; Conv1 accepts when `window_valid && enable_conv1`. | 676 valid locations, each with four pre-ReLU Q6.14 values. |
+| `CONV1` | Pulse `clear_window` for one cycle, then read all 784 image bytes one per cycle through the line buffer. It converts pixels to Q1.7 and emits each complete row-major 3 x 3 window with `window_valid`; Conv1 accepts when `window_valid && enable_conv1`. | 676 valid locations, each with four pre-ReLU Q6.14 values. |
 | `RELU1` | Apply ReLU to each of the four values at every Conv1 location and replace the values in the Conv1 buffer. | 676 four-channel locations, 2,704 values. |
 | `POOL` | Assemble one same-channel block in TL, TR, BL, BR order; process by pooled row, pooled column, then channel. | 676 signed Q6.14 values (13 x 13 x 4), stored location-major with channels 0..3 consecutive. |
-| `CONV2` | Reset the window-source row/column counters to zero, then read the pooled map and form complete 36-value windows using the mapping in Section 7.1.3. Conv2 accepts 121 windows in row-major output-location order. | 121 locations, each with eight pre-ReLU Q6.14 values. |
+| `CONV2` | Pulse `clear_window` for one cycle to reset the window-source row/column counters, then read the pooled map and form complete 36-value windows using the mapping in Section 7.1.3. Conv2 accepts 121 windows in row-major output-location order. | 121 locations, each with eight pre-ReLU Q6.14 values. |
 | `RELU2` | Apply ReLU to each of the eight values at every Conv2 location and replace the values in the Conv2 buffer. | 121 eight-channel locations, 968 values. |
 | `FLATTEN` | Read the 121 eight-channel locations in row-major spatial order and store channel `ch` at `ch * 121 + r * 11 + c`. | One complete 968-value signed Q6.14 vector and one completion pulse after the 121st accepted input vector. |
 | `DENSE` | Pulse `start_dense` on entry, then present flat indices 0..967 sequentially with `feature_valid`. Dense handles parameter access and accumulates all ten class scores. | Ten final signed Q6.14 logits and one `dense_done` pulse. |
@@ -450,16 +450,18 @@ This means:
 
 ### 7.1.3 Equation contract
 
-For Conv1, for each filter `f` and output location `(r, c)`: 
+For Conv1, for each filter `f` and output location `(r, c)`, the convolution module produces a saturated pre-ReLU value, then the separate ReLU stage produces `out1`:
 
 ```text
-out1[f][r][c] = ReLU( sum_{ky=0..2} sum_{kx=0..2} input[r+ky][c+kx] * W1[f][ky][kx] + b1[f] )
+conv1_pre_relu[f][r][c] = saturate20( sum_{ky=0..2} sum_{kx=0..2} input[r+ky][c+kx] * W1[f][ky][kx] + b1[f] )
+out1[f][r][c] = max(0, conv1_pre_relu[f][r][c])
 ```
 
-For Conv2, for each filter `f2` and output location `(r, c)`: 
+For Conv2, for each filter `f2` and output location `(r, c)`, the convolution module produces a saturated pre-ReLU value, then the separate ReLU stage produces `out2`:
 
 ```text
-out2[f2][r][c] = ReLU( sum_{ch=0..3} sum_{ky=0..2} sum_{kx=0..2} pooled[r+ky][c+kx][ch] * W2[f2][ch][ky][kx] + b2[f2] )
+conv2_pre_relu[f2][r][c] = saturate20( arithmetic_shift_right( sum_{ch=0..3} sum_{ky=0..2} sum_{kx=0..2} pooled[r+ky][c+kx][ch] * W2[f2][ch][ky][kx] + (b2[f2] << 7), 7) )
+out2[f2][r][c] = max(0, conv2_pre_relu[f2][r][c])
 ```
 
 In `conv_layer_2.sv`, one complete receptive field is represented by `window[0:35]`, and its weights by `filter_weights[0:7][0:35]`. The single flat position for channel `ch`, kernel row `ky`, and kernel column `kx` is `ch * 9 + ky * 3 + kx`:
@@ -719,11 +721,34 @@ Required states:
 - DENSE
 - DONE
 
+The FSM interface is fixed to these inputs and outputs:
+
+| Signal | Direction | Meaning |
+|---|---|---|
+| `clk`, `rst_n` | input | Clock and active-low asynchronous reset. |
+| `start` | input | Accepted only in `IDLE`; begins one image transaction. |
+| `pixel_valid` | input | Host pixel-valid input; the FSM counts a pixel only when `pixel_valid && ready` in `LOAD_IMAGE`. |
+| `conv1_valid`, `pool_valid`, `conv2_valid` | input | One-cycle result-valid indications; the FSM counts captured outputs in their owning states. |
+| `flatten_done` | input | One-cycle pulse from Flatten after all 121 location vectors have formed the complete 968-value array. |
+| `dense_done` | input | One-cycle pulse from Dense with all ten final logits stable. |
+| `ready`, `done` | output | Top-level image-input ready and one-cycle prediction-valid pulse. |
+| `load_image` | output | High only while the FSM is in `LOAD_IMAGE`. |
+| `enable_conv1`, `enable_pool`, `enable_conv2` | output | Enable the corresponding registered data-processing stage in its FSM phase. |
+| `enable_relu1`, `enable_relu2` | output | Enable one-location-per-cycle in-place ReLU scans of the buffered feature maps. |
+| `enable_flatten` | output | Enable the top-level to present row-major eight-channel vectors to Flatten. |
+| `start_dense` | output | One-cycle initialization pulse on entry to `DENSE`; `feature_valid` remains low on this cycle. |
+| `enable_dense` | output | High after the initialization pulse while the top-level presents the 968 sequential features. |
+| `clear_window` | output | One-cycle pulse on entry to `CONV1` and `CONV2` to reset the active window generator's history/coordinates. |
+
+The stage-enable outputs uniquely identify the active processing phase; the top-level must not maintain a duplicate FSM. In `DENSE`, `start_dense` initializes accumulators first, then `enable_dense` gates feature presentation until all 968 features are sent. The FSM advances to `DONE` only after `dense_done`.
+
 Responsibilities:
 
 - accept `start` only in `IDLE` and control top-level pixel acceptance in `LOAD_IMAGE`
 - enable exactly one compute stage at a time in the order listed above
 - clear per-stage counters/window state on entry to the corresponding stage
+- assert `enable_relu1`, `enable_relu2`, `enable_flatten`, and `enable_dense` for the matching stages; pulse `start_dense` before the first feature
+- wait for `flatten_done` before entering `DENSE` and for `dense_done` before entering `DONE`
 - capture each registered output when its `valid_out` is asserted and count exact expected outputs
 - start Dense after the complete flattened vector is available and wait for `dense_done`
 - assert `done` for one cycle in `DONE`, then return to `IDLE`
