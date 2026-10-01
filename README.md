@@ -356,7 +356,7 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 - `start` is accepted only while the FSM is in `IDLE`. A start while busy is ignored. The first pixel may be presented on the following cycle.
 - `ready` is high only in `LOAD_IMAGE` while fewer than 784 pixels have been accepted. A pixel is accepted on a rising edge when `pixel_valid && ready` is true. When `pixel_valid` is low, `ready` may remain high and the input count holds. After the 784th accepted pixel, `ready` goes low and remains low until a later inference enters `LOAD_IMAGE`.
 - A reset during an inference aborts it and returns the FSM to `IDLE`; a new `start` is required. No partial image or intermediate result is reused.
-- `done` is asserted for exactly one cycle in `DONE`. `predicted_digit` is captured before that pulse and remains stable until reset or the next completed inference. The FSM returns to `IDLE` after the `DONE` cycle; the next `start` can be accepted in `IDLE`.
+- `dense_done` qualifies the completed, stable logits. On the rising edge at the end of the cycle where `dense_done` is high, the top-level captures the combinational Argmax result. `done` is then asserted for exactly one cycle in `DONE`; this pulse is the validity indicator for `predicted_digit`. The captured digit remains stable until reset or the next completed inference. The FSM returns to `IDLE` after the `DONE` cycle; the next `start` can be accepted in `IDLE`.
 
 #### Internal transfers and buffering
 
@@ -380,7 +380,7 @@ For pooling, `pool_block` contains a complete same-channel neighborhood when pre
 | Conv2 map to ReLU2 | One location vector per cycle during `RELU2`; no registered handshake. | Eight signed Q6.14 values per location; all eight are ReLU-processed in parallel and written back in place. |
 | Conv2 map to Flatten | Rising edge with Flatten `valid_in` during `FLATTEN`; spatial vectors arrive row-major. | `feature_data[ch]` for the current `(r,c)` is stored at `flattened_vector[ch * 121 + r * 11 + c]`. After 121 accepted vectors, `valid_out` pulses once for the complete 968-value array, which remains stable through `DENSE`. |
 | Flatten vector to Dense | Pulse `start_dense` on the first `DENSE` cycle while `feature_valid` is low; then assert `feature_valid` once for each flat index 0..967. | One signed Q6.14 feature per valid cycle. Dense asserts `dense_done` once all ten logits are final. |
-| Dense logits to Argmax/top | `dense_done` qualifies the completed logits; Argmax is combinational. | Ten signed Q6.14 logits; the top-level captures the selected 4-bit digit and asserts `done` in `DONE`. |
+| Dense logits to Argmax/top | `dense_done` qualifies ten registered, stable logits. Argmax is combinational; the top-level captures `winning_digit` on the rising edge at the end of the `dense_done`-high cycle. | Ten signed Q6.14 logits; one captured 4-bit digit, qualified externally by the following one-cycle `done` pulse. |
 
 All `valid_out` and completion signals are cleared by reset. A one-cycle valid signal means one result is available during that cycle; adjacent high cycles represent adjacent results where a stage emits one result per cycle. The controller captures results only when valid is high. Flattened data remains stable throughout Dense processing, and logits remain stable from `dense_done` until reset or the next inference completes. Internal stages do not wait for downstream readiness.
 
@@ -398,7 +398,7 @@ FSM order: `IDLE -> LOAD_IMAGE -> CONV1 -> RELU1 -> POOL -> CONV2 -> RELU2 -> FL
 | `RELU2` | Apply ReLU to each of the eight values at every Conv2 location and replace the values in the Conv2 buffer. | 121 eight-channel locations, 968 values. |
 | `FLATTEN` | Read the 121 eight-channel locations in row-major spatial order and store channel `ch` at `ch * 121 + r * 11 + c`. | One complete 968-value signed Q6.14 vector and one completion pulse after the 121st accepted input vector. |
 | `DENSE` | Pulse `start_dense` on entry, then present flat indices 0..967 sequentially with `feature_valid`. Dense handles parameter access and accumulates all ten class scores. | Ten final signed Q6.14 logits and one `dense_done` pulse. |
-| `DONE` | Evaluate/capture argmax result from the completed logits. | One-cycle `done` pulse and stable `predicted_digit`. |
+| `DONE` | Argmax is combinational. Capture its result on the rising edge where the completed `dense_done` pulse is observed, before entering `DONE`. | One-cycle `done` pulse qualifies the captured `predicted_digit`, which remains stable until the next inference completes or reset. |
 
 #### Fixed buffer capacities
 
@@ -835,8 +835,10 @@ Purpose: select the class with the highest score.
 
 Required behavior:
 
-- compare all logits
-- return the maximum index as the predicted digit
+- compare all ten inputs as signed 20-bit values using a combinational comparator; the module has no clock, reset, or valid port
+- initialize the candidate winner to class 0, then scan classes 1 through 9 and replace the winner only when a logit is strictly greater; ties therefore select the lowest class index. The Python integer reference uses the same rule.
+- produce an index in 0..9 when all logits are known; `winning_digit` is meaningful to the top-level only when `dense_done` qualifies the logits
+- do not define a prediction for unknown (`X`/`Z`) logits; the testbench must fail if any logit is unknown when `dense_done` is asserted
 
 ---
 
@@ -850,6 +852,7 @@ Required interface and behavior:
 - load the arrays from `conv1_weights.mem`, `conv2_weights.mem`, `dense_weights.mem`, and `biases.mem` in the documented order
 - use combinational array indexing with no clock, reset, address, or read-latency interface; parameters remain constant after initialization
 - load files relative to the documented simulation working directory (`sim/`)
+- before the first inference, the testbench must verify every parameter-array entry is known and fail with `$fatal` if any weight or bias is uninitialized; exporter checks must also enforce the exact file counts from Section 7.1.5
 
 ---
 
@@ -861,12 +864,14 @@ The testbench must:
 
 1. initialize the clock and reset
 2. load `input_images.mem`, `golden_outputs.mem`, and `labels.mem`
-3. stream one image at a time through the CNN
-4. wait until `done` is asserted
-5. compare `predicted_digit` exactly against the integer-reference prediction in `golden_outputs.mem`
-6. separately compare `predicted_digit` against the ground-truth label in `labels.mem`
-7. report reference agreement and classification accuracy separately
-8. finish with `$finish;`
+3. before the first inference, verify exact fixture counts and that every input, reference prediction, label, weight, and bias is known; fail with `$fatal` on missing, malformed, or unknown entries
+4. stream one image at a time through the CNN
+5. when internal `dense_done` is high, fail with `$fatal` if any of the ten logits is unknown; only then may the top capture Argmax
+6. wait until `done` is asserted and require `predicted_digit` to be in 0..9
+7. compare `predicted_digit` exactly against the integer-reference prediction in `golden_outputs.mem`
+8. separately compare `predicted_digit` against the ground-truth label in `labels.mem`
+9. report reference agreement and classification accuracy separately
+10. finish with `$finish;`
 
 ---
 

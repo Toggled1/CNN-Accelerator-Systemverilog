@@ -1,15 +1,14 @@
-// TODO: implement the argmax selection logic from README.md Section 9.8.
+// TODO: implement the argmax selection logic from README.md Section 9.11.
 // Required behavior:
-// - compare all 10 logits
-// - determine the maximum value
-// - output the class index as a 4-bit digit
+// - compare ten signed logits combinationally
+// - replace the winner only on strict greater-than so ties select the lowest index
+// - treat winning_digit as meaningful only when the top-level samples it at dense_done
 
 module argmax (
     input  logic signed [19:0] logits [0:9],
     output logic [3:0]        winning_digit
 );
 
-    // TODO: implement the comparator logic that selects the maximum logit.
-    // TODO: ensure the output is the digit index from 0 to 9.
+    // TODO: initialize the candidate to class 0 and scan classes 1 through 9.
 
 endmodule

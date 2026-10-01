@@ -1,9 +1,10 @@
-// TODO: implement the self-checking simulation testbench from README.md Section 9.10.
+// TODO: implement the self-checking simulation testbench from README.md Section 9.13.
 // Required behavior:
 // - initialize clock and reset
 // - load input_images.mem, golden_outputs.mem, and labels.mem
 // - stream one MNIST image into the design
 // - wait until done is asserted
+// - fail if any parameter is unknown before inference or any logit is unknown at dense_done
 // - compare predicted_digit exactly against the integer-reference prediction
 // - separately compare predicted_digit against the MNIST ground-truth label
 // - report reference agreement and classification accuracy separately

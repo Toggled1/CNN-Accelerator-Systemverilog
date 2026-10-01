@@ -89,7 +89,9 @@ Fixtures contain 100 official MNIST test examples: the first ten examples of eac
 
 ### 3.8 Tie behavior and invalid cases
 
-Define argmax tie behavior (recommended: retain the lowest digit index by replacing the winner only on strict `>`), behavior for unknown/uninitialized logits if relevant to simulation, and when the top-level prediction is considered valid. For typed parameter arrays, verify initialization and exact element counts rather than defining out-of-range address behavior. Add these to the README rather than leaving behavior implicit.
+Status: resolved in `README.md` Sections 7.4, 9.11, 9.12, and 9.13. Argmax is combinational over ten signed logits, initializes the winner to index 0, scans 1..9, and updates only on strict `>`, so ties select the lowest index. The Python integer reference uses the same tie rule. Argmax has no valid port; `winning_digit` is meaningful only when Dense asserts `dense_done`. The top captures it on the rising edge at the end of the cycle where `dense_done` is high, then asserts `done` for one cycle to qualify `predicted_digit`.
+
+Unknown logits have no defined prediction. The testbench must fail if any logit is X/Z when `dense_done` is asserted. It must also confirm that all entries in the six typed parameter arrays are known before the first inference; offline fixture checks enforce exact file counts, and no inference may start after a failed initialization check. The fixed-size arrays have no runtime address port; all layer indices must stay within their documented ranges.
 
 ### 3.9 Phase 0 exit criteria
 
@@ -147,7 +149,7 @@ Create focused testbenches under `tb/` for modules with meaningful state or arit
 
 Implement `rtl/argmax.sv` and `rtl/relu.sv` first because their behavior is small and isolates signedness.
 
-- Argmax compares all ten logits as signed values, returns 0..9, and obeys frozen tie behavior. Test each index as the unique maximum, all-negative logits, equal maxima, and signed boundary values.
+- Argmax compares all ten logits as signed values, returns 0..9, and updates only on strict `>` so ties retain the lowest index. Test each class as the unique maximum, all-negative logits, ties at several indices, and signed boundary values. Verify the top samples the result only while `dense_done` is high, and make the integration test fail on unknown logits at that event.
 - ReLU maps negative signed input to zero and preserves nonnegative input exactly unless Phase 0 explicitly specifies a requantization/clipping function. Test zero, negative one, minimum, positive one, and maximum.
 
 Exit criteria: their unit tests pass without unknown outputs after reset/settling, with all comparisons explicitly signed.
@@ -243,9 +245,9 @@ Exit criteria: a directed image traverses each sequential FSM phase with exact t
 Implement `tb/tb_top.sv` after the top-level interface is stable.
 
 1. Generate clock and active-low reset; initialize all testbench signals before releasing reset.
-2. Load the committed/generated input, model-parameter, reference-prediction, and ground-truth-label files from paths that work with `make -C sim run`.
+2. Load the committed/generated input, model-parameter, reference-prediction, and ground-truth-label files from paths that work with `make -C sim run`. Before the first inference, verify exact file counts and that all input, reference, label, weight, and bias values are known; fail immediately on a malformed, missing, or unknown entry.
 3. For each selected image, start one inference and send each of 784 unsigned pixels in row-major order according to `pixel_valid`/`ready`. Hold a pixel and valid asserted until accepted if the frozen handshake requires it.
-4. Apply a configurable timeout per inference and fail if `done` is absent, early, repeated, or accompanied by an invalid prediction.
+4. Apply a configurable timeout per inference and fail if `done` is absent, early, repeated, or accompanied by an invalid prediction. On internal `dense_done`, assert all ten logits are known before the top captures Argmax; when `done` is high, require `predicted_digit` in 0..9.
 5. Compare every RTL predicted digit exactly against the integer-reference index in `golden_outputs.mem`. Separately score it against `labels.mem`; do not confuse reference agreement with classification accuracy. Focused Dense tests compare all ten logits against the integer reference.
 6. Report sample count, reference match count, number correct against labels, and accuracy. Any mismatch against reference predictions causes `$fatal` or a nonzero simulator exit so Make and CI fail; accuracy is reported without a minimum threshold.
 7. Run multiple images in one simulator session to verify reset/clear/restart behavior and prove there is no cross-image state leakage.
