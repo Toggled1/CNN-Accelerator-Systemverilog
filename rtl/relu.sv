@@ -14,4 +14,13 @@ module relu (
     // TODO: implement the signed compare/pass-through ReLU defined in README.md.
     // TODO: keep the output in the signed 20-bit Q6.14 convolution-activation domain.
 
+    always_comb begin
+        //Relu on every acc value
+        if(acc_in < 20'sd0)
+            relu_out = 20'sd0;
+        else
+            relu_out = acc_in;
+    end
+
+
 endmodule
