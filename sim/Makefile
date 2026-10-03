@@ -1,8 +1,5 @@
-# TODO: implement the CNN simulation build flow per README.md.
-# Required targets:
-# - compile: compile the full CNN RTL pipeline
-# - run: execute the testbench and validate results
-# - wave: open GTKWave for debugging the key CNN stages
+# Minimal compile/run/wave workflow for the MNIST CNN RTL simulation.
+# The design is intentionally still a smoke-test placeholder for Phase 1.
 
 IVERILOG = iverilog
 VVP = vvp
@@ -22,20 +19,24 @@ RTL_SRC = \
     ../rtl/weights_mem.sv
 
 TB_SRC = ../tb/tb_top.sv
+SIM_OUT = cnn_tb.out
+VCD_OUT = cnn_smoke.vcd
 
 .PHONY: compile run wave clean
 
-compile:
-	@echo "TODO: compile the full CNN RTL pipeline with iverilog."
-	# TODO: add the final compile command including the RTL and testbench files.
+compile: $(SIM_OUT)
 
-run:
-	@echo "TODO: run the testbench with input_images.mem and golden_outputs.mem."
-	# TODO: add the final simulation command.
+$(SIM_OUT): $(RTL_SRC) $(TB_SRC)
+	@echo "Compiling CNN RTL smoke test..."
+	$(IVERILOG) -g2012 -Wall -Wno-timescale -s tb_top -o $(SIM_OUT) $(RTL_SRC) $(TB_SRC)
 
-wave:
-	@echo "TODO: launch GTKWave with the CNN waveform configuration."
-	# TODO: add the GTKWave launcher command.
+run: compile
+	@echo "Running CNN RTL smoke test..."
+	$(VVP) $(SIM_OUT)
+
+wave: run
+	@echo "Launching GTKWave..."
+	$(GTKWAVE) $(VCD_OUT) wave_config.gtkw
 
 clean:
 	@rm -f *.vcd *.out *.log

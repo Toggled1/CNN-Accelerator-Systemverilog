@@ -1,5 +1,4 @@
-# TODO: ignore generated artifacts and simulation outputs.
-# This file should keep the repo clean while building the MNIST RTL simulation project.
+# Ignore generated artifacts and simulation outputs while keeping the repo clean.
 
 *.vcd
 *.fst
@@ -9,6 +8,9 @@
 *.wdb
 *.dat
 *.hex
+sim/*.vcd
+sim/*.out
+sim/*.log
 __pycache__/
 .venv/
 venv/
