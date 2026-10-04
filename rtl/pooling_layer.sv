@@ -17,4 +17,29 @@ module pooling_layer (
     // TODO: implement 2x2 max pooling for each feature map cell.
     // TODO: preserve the location-major, channel-contiguous output order.
 
+    logic signed [19:0] max_value;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            valid_out <= 1'b0;
+            pooled_value <= 20'sd0;
+
+        end else begin
+
+            valid_out <= 1'b0;
+
+            if (enable && valid_in) begin
+                max_value = pool_block[0];
+                for (int i = 1; i < 4; i++) begin
+                    if (pool_block[i] > max_value) begin
+                        max_value = pool_block[i];
+                    end
+                end
+
+                pooled_value <= max_value;
+                valid_out <= 1'b1;
+            end
+        end
+    end
+
 endmodule
