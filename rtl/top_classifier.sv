@@ -154,8 +154,11 @@ end
 
 // Assign image buffer values to the line buffer inputs
 always_comb begin
-    line_buffer_pixel_in = image_buffer[image_read_row][image_read_col]; // Map 1D read index to 2D image buffer
+    line_buffer_pixel_in = 8'd0;
     line_buffer_pixel_valid = enable_conv1 && (image_read_index < 28*28); // Valid when within image bounds and conv1 stage is enabled
+    if (image_read_index >= 0 && image_read_index < 28*28) begin
+        line_buffer_pixel_in = image_buffer[image_read_row][image_read_col];
+    end
 end
 
 // Update the image read index for the line buffer
@@ -303,19 +306,18 @@ relu u_relu_3 (
 
 /*-----------------------------------------------------------------
 
-Pooling Layer
+//Pooling Layer
 
 -----------------------------------------------------------------*/
 
 logic signed [19:0] pool_block [0:3];
 
-int pool_index;
+int pool_index; //counts spatial positions in the pooling layer
 int pool_row;
 int pool_col;
 int pool_channel;
 
 
-logic signed [19:0] pooled_value;
 logic pooling_valid_in;
 
 
@@ -361,6 +363,40 @@ always_ff @(posedge clk or negedge rst_n) begin
         pool_index <= pool_index + ((pool_channel == 3) ? 1 : 0);//pooling stride = 2 every  4-cycle pool_channel cycle
     end
 end
+
+
+
+// Output to Pooled Feature Map
+
+logic signed [19:0] pooled_value;
+logic signed [19:0] pooled_feature_map_buffer [0:12] [0:12] [0:3]; //[row][col][channel]
+int pooled_result_row;
+int pooled_result_col;
+int pooled_result_channel;
+
+
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        pooled_result_row <= 0;
+        pooled_result_col <= 0;
+        pooled_result_channel <= 0;
+    end else begin
+        if (!enable_pool) begin
+            pooled_result_row <= 0;
+            pooled_result_col <= 0;
+            pooled_result_channel <= 0;
+        end else if (pooling_valid_in) begin
+            pooled_result_row <= pool_index / 13; // one cycle delayed from pool_row
+            pooled_result_col <= pool_index % 13; // one cycle delayed from pool_col
+            pooled_result_channel <= pool_channel; // one cycle delayed from pool_channel
+        end
+
+        if (pool_valid && enable_pool) begin
+            pooled_feature_map_buffer[pooled_result_row][pooled_result_col][pooled_result_channel] <= pooled_value;
+        end
+    end
+end
+
 
 pooling_layer u_pooling_layer (
     .clk          (clk),
