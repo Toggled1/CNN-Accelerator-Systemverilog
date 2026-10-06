@@ -20,4 +20,36 @@ module dense_layer (
     // For flat index i, each class reads dense_weights[class][i].
     // TODO: implement ten accumulators using the Section 5 arithmetic rules.
 
+    int index;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            index <= 0;
+            dense_done <= 1'b0;
+            for (int i = 0; i < 10; i++) begin
+                logits[i] <= 20'sd0;
+            end
+        end else begin
+            // dense layer computation here
+
+            if (start_dense && feature_valid) begin
+
+                //dot with each of the w10 weights (each number)
+
+                //logit[k] = bias[k] + sum(flat[i] * weight[k][i])
+
+                //then argmax determines which dot product aligns the most
+
+//That is ten dot products, each with 968 terms. The README stores weights class-major: the 968 weights for class 0, then class 1, through class 9.
+
+
+
+
+            end
+            index <= index + 1;
+        end
+    end
 endmodule
+
+
+//    output logic signed [19:0] flattened_vector [0:967]
