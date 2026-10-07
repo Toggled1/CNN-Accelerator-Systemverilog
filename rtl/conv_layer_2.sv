@@ -47,7 +47,7 @@ module conv_layer_2 (
 
             for (int k = 0; k < 36; k++) begin
                 product = $signed({{8{window[k][19]}}, window[k]}) * $signed({{20{filter_weights[f][k][7]}}, filter_weights[f][k]}); //product bits = 20 window bits+ 8 filter bits= 28
-                mac[f] = mac[f] + $signed({{12{product[27]}}, product});
+                mac[f] = mac[f] + $signed({{12{product[27]}}, product}); //we shifted bias earlier because 14 fractional bits (Q6.14) while the product has 21 fractional bits (Q7.21)
             end
 
             scaled_mac[f] = mac[f] >>> 7; // shift back to Q6.14 format from Q7.21

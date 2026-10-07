@@ -6,11 +6,11 @@ module conv_layer_1 (
     input  logic rst_n,
     input  logic enable,
     input  logic valid_in,
-    input  logic signed [7:0] window [0:8],
-    input  logic signed [7:0] filter_weights [0:3][0:8],
+    input  logic signed [7:0] window [0:8], //Q1.7
+    input  logic signed [7:0] filter_weights [0:3][0:8], //Q1.7
     input  logic signed [19:0] filter_biases [0:3],
     output logic valid_out,
-    output logic signed [19:0] feature_map [0:3]
+    output logic signed [19:0] feature_map [0:3] //Q6.14
 );
 
     logic signed [39:0] mac [0:3]; // intermediate MAC results for the 4 filters
@@ -48,10 +48,10 @@ module conv_layer_1 (
             for (int k = 0; k < 9; k++) begin
 
                 //product is 16 bits and sign extended from 8-bit window and filter weights
-                product = $signed({{8{window[k][7]}}, window[k]}) * $signed({{8{filter_weights[f][k][7]}}, filter_weights[f][k]});
+                product = $signed({{8{window[k][7]}}, window[k]}) * $signed({{8{filter_weights[f][k][7]}}, filter_weights[f][k]}); //Q2.14
 
                 // Add the bias and the product
-                mac[f] = mac[f] + $signed({{24{product[15]}}, product});
+                mac[f] = mac[f] + $signed({{24{product[15]}}, product}); //bias (Q6.14) also has 14 fractional bits, so no shift needed
             end
 
             //saturate to signed 20-bit range
