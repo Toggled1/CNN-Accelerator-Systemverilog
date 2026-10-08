@@ -17,7 +17,7 @@ module argmax (
         for(int i = 1; i <= 9; i++) begin
 
             if(logits[i] > logits[winning_digit])
-                winning_digit = i;
+                winning_digit = i[3:0]; //take 4 lsb of 32 bit int
         end
 
     end
