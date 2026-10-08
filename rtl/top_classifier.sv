@@ -197,8 +197,8 @@ line_buffer u_line_buffer(
 
 
 // Feature map signals
-logic signed [19:0] feature_map_buffer [0:25] [0:25] [0:3]; //[row][col][channel]
-logic signed [19:0] conv_1_feature_map_item [0:3]; // Output of the conv1 layer for each channel
+logic signed [19:0] conv1_feature_map_buffer [0:25] [0:25] [0:3]; //[row][col][channel]
+logic signed [19:0] conv1_feature_map_item [0:3]; // Output of the conv1 layer for each channel
 int conv1_output_index;
 int conv1_output_row;
 int conv1_output_col;
@@ -219,7 +219,7 @@ always_comb begin
     relu1_col = relu1_index % 26;
 end
 
-logic signed [19:0] relu_out [0:3];
+logic signed [19:0] relu1_out [0:3];
 
 
 
@@ -233,7 +233,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         for (int row = 0; row < 26; row = row + 1) begin
             for (int col = 0; col < 26; col = col + 1) begin
                 for (int ch = 0; ch < 4; ch = ch + 1) begin
-                    feature_map_buffer[row][col][ch] <= 20'd0;
+                    conv1_feature_map_buffer[row][col][ch] <= 20'd0;
                 end
             end
         end
@@ -247,10 +247,10 @@ always_ff @(posedge clk or negedge rst_n) begin
     
         end else begin
 
-            // CONV1 STAGE: Load feature_map_buffer with stream of conv1 output
+            // CONV1 STAGE: Load conv1_feature_map_buffer with stream of conv1 output
             if (conv1_valid && conv1_output_index < 26*26) begin
                 for (int ch = 0; ch < 4; ch++) begin
-                    feature_map_buffer[conv1_output_row][conv1_output_col][ch] <= conv_1_feature_map_item[ch];
+                    conv1_feature_map_buffer[conv1_output_row][conv1_output_col][ch] <= conv1_feature_map_item[ch];
                 end
                 conv1_output_index <= conv1_output_index + 1;
             end
@@ -258,7 +258,7 @@ always_ff @(posedge clk or negedge rst_n) begin
             // RELU STAGE: Apply ReLU activation to the current feature map element
             if (enable_relu1) begin
                 for (int ch = 0; ch < 4; ch++) begin
-                    feature_map_buffer[relu1_row][relu1_col][ch] <= relu_out[ch];
+                    conv1_feature_map_buffer[relu1_row][relu1_col][ch] <= relu1_out[ch];
                 end
                 if (relu1_index == 26*26-1) begin
                     relu1_index <= 0;
@@ -282,27 +282,40 @@ conv_layer_1 u_conv_layer_1(
     .filter_weights (conv1_weights),
     .filter_biases  (conv1_biases),
     .valid_out      (conv1_valid),
-    .feature_map    (conv_1_feature_map_item)
+    .feature_map    (conv1_feature_map_item)
 );
 
 
  
-relu u_relu_0 (
-    .acc_in  (feature_map_buffer[relu1_row][relu1_col][0]),
-    .relu_out(relu_out[0])
-);
-relu u_relu_1 (
-    .acc_in  (feature_map_buffer[relu1_row][relu1_col][1]),
-    .relu_out(relu_out[1])
-);
-relu u_relu_2 (
-    .acc_in  (feature_map_buffer[relu1_row][relu1_col][2]),
-    .relu_out(relu_out[2])
-);
-relu u_relu_3 (
-    .acc_in  (feature_map_buffer[relu1_row][relu1_col][3]),
-    .relu_out(relu_out[3])
-);
+// relu u_relu_0 (
+//     .acc_in  (conv1_feature_map_buffer[relu1_row][relu1_col][0]),
+//     .relu_out(relu_out[0])
+// );
+// relu u_relu_1 (
+//     .acc_in  (conv1_feature_map_buffer[relu1_row][relu1_col][1]),
+//     .relu_out(relu_out[1])
+// );
+// relu u_relu_2 (
+//     .acc_in  (conv1_feature_map_buffer[relu1_row][relu1_col][2]),
+//     .relu_out(relu_out[2])
+// );
+// relu u_relu_3 (
+//     .acc_in  (conv1_feature_map_buffer[relu1_row][relu1_col][3]),
+//     .relu_out(relu_out[3])
+// );
+
+for(genvar ch = 0; ch < 4; ch++) begin : g_relu1
+
+    relu urelu1(
+        .acc_in  (conv1_feature_map_buffer[relu1_row][relu1_col][ch]),
+        .relu_out(relu1_out[ch])
+    );
+
+
+end
+
+
+
 
 /*-----------------------------------------------------------------
 
@@ -337,10 +350,10 @@ always_comb begin
     pooling_valid_in = enable_pool && (pool_index < 13*13) && (pool_channel < 4);
 
     if (pooling_valid_in) begin
-        pool_block[0] = feature_map_buffer[pool_row][pool_col][pool_channel];
-        pool_block[1] = feature_map_buffer[pool_row][pool_col+1][pool_channel];
-        pool_block[2] = feature_map_buffer[pool_row+1][pool_col][pool_channel];
-        pool_block[3] = feature_map_buffer[pool_row+1][pool_col+1][pool_channel];
+        pool_block[0] = conv1_feature_map_buffer[pool_row][pool_col][pool_channel];
+        pool_block[1] = conv1_feature_map_buffer[pool_row][pool_col+1][pool_channel];
+        pool_block[2] = conv1_feature_map_buffer[pool_row+1][pool_col][pool_channel];
+        pool_block[3] = conv1_feature_map_buffer[pool_row+1][pool_col+1][pool_channel];
     end
 end
 
@@ -407,6 +420,171 @@ pooling_layer u_pooling_layer (
     .valid_out    (pool_valid),
     .pooled_value (pooled_value)
 );
+
+
+/*-----------------------------------------------------------------
+
+// Convolution Layer 2  | Feature map buffer construction | ReLU Process
+
+-----------------------------------------------------------------*/
+
+
+
+
+
+
+logic signed [19:0] conv2_feature_map_buffer [0:10] [0:10] [0:7]; //[row][col][channel]: 11x11x8
+logic signed [19:0] conv2_feature_map_item [0:7]; // Output of the conv1 layer for each channel
+int conv2_output_index;
+int conv2_output_row;
+int conv2_output_col;
+
+always_comb begin
+    conv2_output_row = conv2_output_index / 11;
+    conv2_output_col = conv2_output_index % 11;
+end
+
+
+
+// ReLU indexing signals for Conv2 layer
+int relu2_index;
+int relu2_row;
+int relu2_col;
+
+always_comb begin
+    relu2_row = relu2_index / 11;
+    relu2_col = relu2_index % 11;
+end
+
+logic signed [19:0] relu2_out [0:7];
+
+
+
+int window_conv2_index;
+int window_conv2_row;
+int window_conv2_col;
+
+always_comb begin
+    window_conv2_row = window_conv2_index / 11;
+    window_conv2_col = window_conv2_index % 11;
+end
+
+
+//window valid calculation
+logic window_conv2_valid;
+
+//assembling the 3x3 windows for each channel: 9 (ch0) -> 9 (ch1) -> 9 (ch2) -> 9 (ch3) -> 36 total elements
+logic signed [19:0] conv2_window [0:35]; //3x3x8
+
+always_comb begin
+
+    window_conv2_valid = 1'b0;
+    for (int i = 0; i < 36; i++) begin
+        conv2_window[i] = 20'd0;
+    end
+
+    if (enable_conv2 && !clear_window && window_conv2_index < 11*11) begin
+        for (int ch = 0; ch < 4; ch++) begin
+            for (int row = 0; row < 3; row++) begin
+                for (int col = 0; col < 3; col++) begin
+                    conv2_window[ch*9 + row*3 + col] = pooled_feature_map_buffer[window_conv2_row + row][window_conv2_col + col][ch];
+                end
+                
+            end
+        end
+        window_conv2_valid = 1'b1;
+    end
+end
+
+
+
+
+
+
+// Combined always_ff process for Conv and ReLU
+always_ff @(posedge clk or negedge rst_n) begin
+
+    if (!rst_n) begin
+        // Reset logic for feature map buffer and ReLU index
+        conv2_output_index <= 0;
+        relu2_index <= 0;
+        window_conv2_index <= 0;
+
+        for (int row = 0; row < 11; row = row + 1) begin
+            for (int col = 0; col < 11; col = col + 1) begin
+                for (int ch = 0; ch < 8; ch = ch + 1) begin
+                    conv2_feature_map_buffer[row][col][ch] <= 20'd0;
+                end
+            end
+        end
+
+    end else begin
+
+        // Clear the feature map row and column indices if the window is cleared
+        if (clear_window) begin
+            conv2_output_index <= 0;
+            relu2_index <= 0;
+            window_conv2_index <= 0;
+    
+        end else begin
+
+            if (enable_conv2 && window_conv2_valid) begin
+                window_conv2_index <= window_conv2_index + 1;
+            end
+
+            // CONV2 STAGE: Load conv2_feature_map_buffer with stream of conv2 output
+            if (conv2_valid && conv2_output_index < 11*11) begin
+                for (int ch = 0; ch < 8; ch++) begin
+                    conv2_feature_map_buffer[conv2_output_row][conv2_output_col][ch] <= conv2_feature_map_item[ch];
+                end
+                conv2_output_index <= conv2_output_index + 1;
+            end
+
+            // RELU STAGE: Apply ReLU activation to the current feature map element
+            if (enable_relu2) begin
+                for (int ch = 0; ch < 8; ch++) begin
+                    conv2_feature_map_buffer[relu2_row][relu2_col][ch] <= relu2_out[ch];
+                end
+                if (relu2_index == 11*11-1) begin
+                    relu2_index <= 0;
+                end else begin
+                    relu2_index <= relu2_index + 1;
+                end
+            end else begin
+                relu2_index <= 0;
+            end
+        end
+    end
+
+end
+
+
+
+conv_layer_2 u_conv_layer_2(
+    .clk            (clk),
+    .rst_n          (rst_n),
+    .enable         (enable_conv2),
+    .valid_in       (window_conv2_valid),
+    .window         (conv2_window),
+    .filter_weights (conv2_weights),
+    .filter_biases  (conv2_biases),
+    .valid_out      (conv2_valid),
+    .feature_map    (conv2_feature_map_item)
+);
+
+
+
+for(genvar ch = 0; ch < 8; ch++) begin : g_relu2
+
+    relu urelu2(
+        .acc_in  (conv2_feature_map_buffer[relu2_row][relu2_col][ch]),
+        .relu_out(relu2_out[ch])
+    );
+
+
+end
+
+
 
 
 
