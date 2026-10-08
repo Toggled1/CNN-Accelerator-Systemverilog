@@ -660,16 +660,81 @@ flatten_layer u_flatten_layer(
 
 
 
+/*-----------------------------------------------------
+
+Dense Layer
+
+-----------------------------------------------------*/
+
+
+logic signed [19:0] logits [0:9];
+logic dense_feature_valid;
+logic signed [19:0] dense_feature_pixel; //there are 968 flattened feature pixels (11*11*8)
+
+int flat_dense_index;
+
+always_ff @(posedge clk or negedge rst_n) begin
+    
+    if (!rst_n) begin
+
+        dense_feature_pixel <= 20'sd0;
+        dense_feature_valid <= 1'b0;
+        flat_dense_index <= 0;
+
+    // initialize dense layer
+    end else if (start_dense) begin
+        dense_feature_pixel <= 20'sd0;
+        dense_feature_valid <= 1'b0;
+        flat_dense_index <= 0;
+
+    // feed flattened vector to dense layer
+    end else if (enable_dense && flat_dense_index < 968) begin
+        dense_feature_pixel <= flattened_vector[flat_dense_index];
+        dense_feature_valid <= 1'b1;
+        flat_dense_index <= flat_dense_index + 1;
+    end else begin
+        dense_feature_valid <= 1'b0;
+    end
+end
+
+
+
+dense_layer u_dense_layer(
+    .clk           (clk),
+    .rst_n         (rst_n),
+    .start_dense   (start_dense),
+    .feature_pixel (dense_feature_pixel),
+    .feature_valid (dense_feature_valid),
+    .dense_weights (dense_weights),
+    .dense_biases  (dense_biases ),
+    .dense_done    (dense_done),
+    .logits        (logits)
+);
 
 
 
 
+/*-----------------------------------------------------
 
+// Argmax
 
+-----------------------------------------------------*/
 
+logic [3:0] winning_digit;
 
+//connect up argmax output to predicted digit
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        predicted_digit <= 4'd0;
+    end else if (dense_done) begin
+        predicted_digit <= winning_digit;
+    end
+end
 
-
+argmax u_argmax(
+    .logits        (logits),
+    .winning_digit (winning_digit)
+);
 
 
 
