@@ -581,8 +581,93 @@ for(genvar ch = 0; ch < 8; ch++) begin : g_relu2
         .relu_out(relu2_out[ch])
     );
 
-
 end
+
+
+
+/*-----------------------------------------------------
+ 
+//Flatten
+
+-----------------------------------------------------*/
+
+logic signed [19:0] flattened_vector [0:967];
+logic flat_valid_in;
+logic flat_valid_out;
+logic signed [19:0] flat_data_in [0:7];
+
+
+int conv2_flat_index;
+int conv2_flat_row;
+int conv2_flat_col;
+
+always_comb begin
+    conv2_flat_row = conv2_flat_index / 11;
+    conv2_flat_col = conv2_flat_index % 11;
+end
+
+
+
+
+always_comb begin
+
+    // valid data in given these conditions
+    flat_valid_in = rst_n && enable_flatten && (conv2_flat_index < 11*11);
+
+    //initialize to zero
+    for (int ch = 0; ch < 8; ch++) begin
+        flat_data_in[ch] = 20'sd0;
+    end
+
+    //feed from post-relu conv2 buffer
+    if (conv2_flat_index < 11*11) begin
+        for (int ch = 0; ch < 8; ch++) begin
+            flat_data_in[ch] = conv2_feature_map_buffer[conv2_flat_row][conv2_flat_col][ch];
+        end
+    end
+end
+
+
+
+always_ff @(posedge clk or negedge rst_n) begin
+
+    if (!rst_n) begin
+        conv2_flat_index <= 0;
+
+    end else if (!enable_flatten) begin
+        conv2_flat_index <= 0;
+
+    end else if (flat_valid_in) begin
+        conv2_flat_index <= conv2_flat_index + 1;
+    end
+end
+
+assign flatten_done = flat_valid_out;
+
+
+
+
+
+flatten_layer u_flatten_layer(
+    .clk              (clk),
+    .rst_n            (rst_n),
+    .valid_in         (flat_valid_in),
+    .feature_data     (flat_data_in),
+    .valid_out        (flat_valid_out),
+    .flattened_vector (flattened_vector)
+);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
