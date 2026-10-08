@@ -21,8 +21,9 @@ RTL_SRC = \
 TB_SRC = ../tb/tb_top.sv
 SIM_OUT = cnn_tb.out
 VCD_OUT = cnn_smoke.vcd
+UNIT_TESTS = argmax conv_layer_1 conv_layer_2 dense_layer flatten_layer pooling_layer weights_mem
 
-.PHONY: compile run wave clean
+.PHONY: compile run wave unit-test clean
 
 compile: $(SIM_OUT)
 
@@ -37,6 +38,14 @@ run: compile
 wave: run
 	@echo "Launching GTKWave..."
 	$(GTKWAVE) $(VCD_OUT) wave_config.gtkw
+
+unit-test:
+	@set -e; \
+	for test_name in $(UNIT_TESTS); do \
+		echo "Running tb_$$test_name..."; \
+		$(IVERILOG) -g2012 -Wall -Wno-timescale -s tb_$$test_name -o /tmp/g_cnn_tb_$$test_name.out ../rtl/$$test_name.sv ../tb/tb_$$test_name.sv; \
+		$(VVP) /tmp/g_cnn_tb_$$test_name.out; \
+	done
 
 clean:
 	@rm -f *.vcd *.out *.log
