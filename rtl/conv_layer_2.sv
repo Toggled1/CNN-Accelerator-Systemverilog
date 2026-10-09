@@ -1,6 +1,5 @@
-// Second convolution stage for the MNIST CNN project.
-// Architecture: 13x13x4 input -> 11x11x8 output
-// This stage extracts higher-level features from the pooled feature map.
+//Performs the second convolution stage
+//13x13x4 input -> 11x11x8 output
 
 module conv_layer_2 (
     input  logic clk,

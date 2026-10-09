@@ -1,8 +1,6 @@
-// TODO: implement the typed parameter arrays described in README.md Section 9.12.
-// Required behavior:
-// - initialize weights and biases from exported .mem files
-// - keep memory layout consistent with the Python export order
-// - support read-only values for the simulation environment
+//Initialize weights and biases from exported .mem files
+//keep memory layout consistent with the Python export order
+//These are read-only values
 
 module weights_mem (
     output logic signed [7:0] conv1_weights [0:3][0:8],

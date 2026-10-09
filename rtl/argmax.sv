@@ -1,8 +1,4 @@
-// TODO: implement the argmax selection logic from README.md Section 9.11.
-// Required behavior:
-// - compare ten signed logits combinationally
-// - replace the winner only on strict greater-than so ties select the lowest index
-// - treat winning_digit as meaningful only when the top-level samples it at dense_done
+//Compare ten signed logits combinationally -> output winning digit in logic [3:0]
 
 module argmax (
     input  logic signed [19:0] logits [0:9],

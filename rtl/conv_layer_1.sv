@@ -1,5 +1,5 @@
-// First convolution stage for the MNIST CNN project.
-// Architecture: 28x28x1 input -> 26x26x4 pre-ReLU output
+//Perform the first convolution stage
+//28x28x1 input -> 26x26x4 pre-ReLU output
 
 module conv_layer_1 (
     input  logic clk,

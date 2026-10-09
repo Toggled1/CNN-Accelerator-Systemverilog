@@ -1,5 +1,5 @@
-// 2x2 max pooling stage for the MNIST CNN project.
-// Architecture: 26x26x4 -> 13x13x4 after pooling
+// 2x2 max pooling stage
+//26x26x4 -> 13x13x4 after pooling
 
 module pooling_layer (
     input  logic clk,

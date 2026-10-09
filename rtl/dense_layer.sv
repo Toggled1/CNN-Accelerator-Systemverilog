@@ -1,5 +1,5 @@
-// Computes ten class scores from the flattened Q6.14 feature vector.
-// Products and running sums use Q7.21 scale; final logits are saturated Q6.14.
+//Computes ten class scores from the flattened Q6.14 feature vector
+//Products and running sums use Q7.21, final logits are saturated Q6.14
 
 module dense_layer (
     input  logic        clk,

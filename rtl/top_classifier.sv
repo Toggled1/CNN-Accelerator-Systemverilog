@@ -1,3 +1,4 @@
+//Top-level classifier controlled by control_fsm.sv
 
 module top_classifier (
     input  logic        clk,

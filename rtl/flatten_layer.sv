@@ -1,5 +1,5 @@
-// Flatten stage for the MNIST CNN project.
-// Converts the feature maps into a single vector for the dense classifier.
+//Converts the feature maps into a single vector for the dense classifier
+// 11x11x8 input -> 968 vector
 
 module flatten_layer (
     input  logic clk,

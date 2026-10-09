@@ -1,8 +1,5 @@
-// TODO: implement the activation stage from README.md Section 9.8.
-// Required behavior:
-// - apply ReLU to the signed input value
-// - if value < 0, output 0
-// - otherwise pass through the signed Q6.14 value unchanged
+//if value < 0, output 0
+//otherwise pass through the signed Q6.14 value unchanged
 
 module relu (
     input  logic signed [19:0] acc_in,
