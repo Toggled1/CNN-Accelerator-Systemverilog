@@ -53,7 +53,6 @@ module control_fsm (
     //fsm state register and next state logic
     state_t state;
     state_t next_state;
-    int pixel_count;
     int stage_count;
 
 
@@ -61,21 +60,13 @@ module control_fsm (
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
-            pixel_count <= 0;
             stage_count <= 0;
         end 
         
         else begin
             state <= next_state;
-            
-            if(state == LOAD_IMAGE) begin
-                if (pixel_valid) pixel_count <= pixel_count + 1;
-        //when not in LOAD_IMAGE just set pixel_count to 0
-            end else begin
-                pixel_count <= 0;
-            end
 
-            //increment stage_count if staying in the same state
+            //stage_count is cleared on every state change, so other states hold 0
             if(state != next_state) begin
                 stage_count <= 0;
             end
@@ -84,14 +75,15 @@ module control_fsm (
 
                 case (state)
 
+                    LOAD_IMAGE: if(pixel_valid) stage_count <= stage_count + 1;
                     CONV1: if(conv1_valid)  stage_count <= stage_count + 1;
                     RELU1:                  stage_count <= stage_count + 1;
                     POOL: if(pool_valid)    stage_count <= stage_count + 1;
                     CONV2: if(conv2_valid)  stage_count <= stage_count + 1;
                     RELU2:                  stage_count <= stage_count + 1;
-                    IDLE, LOAD_IMAGE, CLEAR_CONV1, CLEAR_CONV2, FLATTEN, DENSE_START, DENSE, DONE: stage_count <= 0;
 
-                    default: stage_count <=0;
+                    IDLE, CLEAR_CONV1, CLEAR_CONV2, FLATTEN, DENSE_START, DENSE, DONE: ;
+                    default: ;
                 endcase
             end
         
@@ -129,8 +121,8 @@ module control_fsm (
 
             LOAD_IMAGE: begin
                 load_image = 1'b1;
-                ready = (pixel_count < IMAGE_PIXELS);
-                if ((pixel_count == IMAGE_PIXELS -1) && pixel_valid && ready) begin
+                ready = 1'b1; //the FSM leaves LOAD_IMAGE on the 784th pixel
+                if ((stage_count == IMAGE_PIXELS -1) && pixel_valid) begin
                     next_state = CLEAR_CONV1;
                 end
             end
@@ -210,7 +202,10 @@ module control_fsm (
                 end
             end
 
-            DONE: next_state = IDLE;
+            DONE: begin
+                done = 1'b1;
+                next_state = IDLE;
+            end
 
             default: next_state = IDLE;
 
