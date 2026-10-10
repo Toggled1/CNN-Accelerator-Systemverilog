@@ -25,10 +25,10 @@ module control_fsm (
 );
 
     //constant sizes
-    localparam int unsigned IMAGE_PIXELS = 28*28;
-    localparam int unsigned CONV1_output = 26*26;
-    localparam int unsigned POOL_output = 13*13*4;
-    localparam int unsigned CONV2_output = 11*11;
+    localparam int IMAGE_PIXELS = 28*28;
+    localparam int CONV1_OUTPUTS = 26*26;
+    localparam int POOL_OUTPUTS = 13*13*4;
+    localparam int CONV2_OUTPUTS = 11*11;
 
 
     //states
@@ -99,13 +99,123 @@ module control_fsm (
     end
 
 
-//combinational part of the fsm (next state logic)
-always_comb begin
+    //combinational part of the fsm (next state logic)
+    always_comb begin
+
+        //default assignment is below
+        next_state = state;
+        
+        ready = 1'b0;
+        done = 1'b0;
+        load_image = 1'b0;
+        enable_conv1 = 1'b0;
+        enable_relu1 = 1'b0;
+        enable_pool = 1'b0;
+        enable_conv2 = 1'b0;
+        enable_relu2 = 1'b0;
+        enable_flatten = 1'b0;
+        start_dense = 1'b0;
+        enable_dense = 1'b0;
+        clear_window = 1'b0;
+
+        //next state logic is below
+        case (state)
+
+            IDLE: begin
+                if (start) begin
+                    next_state = LOAD_IMAGE;
+                end
+            end
+
+            LOAD_IMAGE: begin
+                load_image = 1'b1;
+                ready = (pixel_count < IMAGE_PIXELS);
+                if ((pixel_count == IMAGE_PIXELS -1) && pixel_valid && ready) begin
+                    next_state = CLEAR_CONV1;
+                end
+            end
+
+            CLEAR_CONV1: begin
+                clear_window = 1'b1;
+                next_state = CONV1; 
+            end
+
+            CONV1: begin
+
+                enable_conv1 = 1'b1;
+                
+                if (conv1_valid && stage_count == CONV1_OUTPUTS -1) begin
+                    next_state = RELU1;
+                end
+            end
 
 
+            RELU1: begin
+
+                enable_relu1 = 1'b1;
+
+                if(stage_count == CONV1_OUTPUTS -1) begin
+                    next_state = POOL;
+                end
+            end
+
+            POOL: begin
+
+                enable_pool = 1'b1;
+
+                if (pool_valid && stage_count == POOL_OUTPUTS -1) begin
+                    next_state = CLEAR_CONV2;
+                end
+            end
+
+            CLEAR_CONV2: begin
+                clear_window = 1'b1;
+                next_state = CONV2;
+            end
+
+            CONV2: begin
+
+                enable_conv2 =1'b1;
+                if (conv2_valid && stage_count == CONV2_OUTPUTS -1) begin
+                    next_state = RELU2;
+                end
+            end
+
+            RELU2: begin
+                
+                enable_relu2 = 1'b1;
+                if (stage_count == CONV2_OUTPUTS -1) begin
+                    next_state = FLATTEN;
+                end
+            end
+
+            FLATTEN: begin
+                enable_flatten = 1'b1;
+                if (flatten_done) begin
+                    next_state = DENSE_START;
+                end
+            end
+
+            DENSE_START: begin                
+                start_dense = 1'b1;
+                next_state = DENSE;
+            end
+
+            DENSE: begin
+                
+                enable_dense = 1'b1;
+                if (dense_done) begin
+                    
+                    next_state = DONE;
+                end
+            end
+
+            DONE: next_state = IDLE;
+
+            default: next_state = IDLE;
 
 
-end
-
+        endcase
+    end
 
 endmodule
