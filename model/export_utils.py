@@ -1,19 +1,23 @@
-"""Quantization and .mem serialization helpers (README Sections 5.3, 7.1.5, 10)."""
+"""
 
-from __future__ import annotations
+helper functions for quantization and for writing the test_vector .mem files!
+
+"""
 
 from pathlib import Path
 
 import numpy as np
 
-WEIGHT_FRAC_BITS = 7
-BIAS_FRAC_BITS = 14
-WEIGHT_MIN, WEIGHT_MAX = -128, 127
-BIAS_MIN, BIAS_MAX = -(1 << 19), (1 << 19) - 1
+WEIGHT_FRAC_BITS = 7 # for Q1.7
+BIAS_FRAC_BITS = 14 # for Q6.14
+
+#integer ranges
+WEIGHT_MIN, WEIGHT_MAX = -(1 << 7), (1 << 7) - 1 
+BIAS_MIN, BIAS_MAX = -(1 << 19), (1 << 19) - 1 
 
 
 def _round_half_away(x: np.ndarray) -> np.ndarray:
-    return np.sign(x) * np.floor(np.abs(x) + 0.5)
+    return np.sign(x) * np.floor(np.abs(x) + 0.5) #rounds to nearest whole number with exact halves goning away from zero.
 
 
 def quantize_weights(w) -> np.ndarray:
@@ -47,12 +51,16 @@ def quantize_model(model) -> dict[str, np.ndarray]:
 
 
 def to_hex(value: int, digits: int) -> str:
-    """Two's-complement hex of `value`, zero-padded to `digits` hex digits."""
-    return format(int(value) & ((1 << (4 * digits)) - 1), f"0{digits}x")
+    # keeps just the lowest (4*digits) bit of the sign-extended int value."""
+    return format(int(value) & ((1 << (4 * digits)) - 1), f"0{digits}x") 
 
 
 def write_mem(path: Path, values, digits: int, expected_count: int) -> None:
+
+    # after converting to numpy array, flattens the array to 1-D in row major ordering
     flat = np.asarray(values).reshape(-1)
-    if flat.size != expected_count:
+
+    if (flat.size != expected_count):
         raise ValueError(f"{path.name}: expected {expected_count} values, got {flat.size}")
+
     path.write_text("".join(to_hex(v, digits) + "\n" for v in flat))

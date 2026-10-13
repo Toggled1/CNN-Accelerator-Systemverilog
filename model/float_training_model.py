@@ -1,7 +1,4 @@
-"""Compact CNN definition for the MNIST RTL simulation project.
-
-Architecture:
-- Input: 28x28x1 MNIST image
+"""- Input: 28x28x1 MNIST image
 - Conv1: 3x3 kernel, 4 filters
 - ReLU
 - MaxPool: 2x2 stride 2
@@ -11,14 +8,12 @@ Architecture:
 - Dense: 968 -> 10 logits
 - Argmax for digit prediction
 
-The purpose of this file is to define the actual model in floating point used by the RTL design and the
-Python export pipeline. The exported weights must match the hardware memory order.
 """
 
 import torch
 import torch.nn as nn
 
-# Hardware parameter ranges: weights are Q1.7, biases are Q6.14.
+# (real ranges): weights are Q1.7, biases are Q6.14.
 
 # [-1.0, 0.9921875]
 WEIGHT_MIN, WEIGHT_MAX = -(2**0), 2**0 - 2**(-7) # 0 integer bits (1 sign bit)
