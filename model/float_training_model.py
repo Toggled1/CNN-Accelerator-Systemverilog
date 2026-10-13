@@ -46,7 +46,6 @@ class CNN(nn.Module):
             nn.MaxPool2d(2, 2),              # 26x26x4 -> 13x13x4
             nn.Conv2d(4, 8, kernel_size=3),  # 13x13x4 -> 11x11x8
             nn.ReLU(),
-            # (N, C, H, W) flatten gives ch * 121 + r * 11 + c, the RTL channel-major order.
             nn.Flatten(),                    # 11x11x8 -> 968
             nn.Linear(8 * 11 * 11, 10),      # 968 -> 10 logits # same is "dense" in the rtl
         )
