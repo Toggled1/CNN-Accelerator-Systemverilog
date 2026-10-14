@@ -1,5 +1,54 @@
-# TODO: define the GTKWave configuration for signal debugging.
-# This file should be aligned with the signal names used by the final RTL implementation.
-# Include the key nets for: clk, rst_n, start, done, predicted_digit, and major MAC/dense signals.
-
-# TODO: add GTKWave signal declarations after implementation.
+[*] GTKWave Analyzer save file
+[timestart] 0
+[size] 1600 900
+[pos] -1 -1
+@28
+tb_top.clk
+tb_top.rst_n
+tb_top.start
+tb_top.ready
+tb_top.pixel_valid
+tb_top.pixel_in[7:0]
+tb_top.dut.image_write_index[31:0]
+tb_top.dut.load_image
+tb_top.dut.image_read_index[31:0]
+tb_top.dut.line_buffer_pixel_valid
+tb_top.dut.line_buffer_pixel_in[7:0]
+tb_top.dut.u_line_buffer.static_point_pixel[7:0]
+tb_top.dut.u_control_fsm.state[3:0]
+tb_top.dut.u_control_fsm.stage_count[31:0]
+tb_top.dut.clear_window
+tb_top.dut.enable_conv1
+tb_top.dut.window_conv1_valid
+tb_top.dut.conv1_valid
+tb_top.dut.conv1_output_index[31:0]
+tb_top.dut.enable_relu1
+tb_top.dut.relu1_index[31:0]
+tb_top.dut.enable_pool
+tb_top.dut.pooling_valid_in
+tb_top.dut.pool_index[31:0]
+tb_top.dut.pool_channel[31:0]
+tb_top.dut.pool_valid
+tb_top.dut.pooled_value[19:0]
+tb_top.dut.enable_conv2
+tb_top.dut.window_conv2_valid
+tb_top.dut.window_conv2_index[31:0]
+tb_top.dut.conv2_valid
+tb_top.dut.conv2_output_index[31:0]
+tb_top.dut.enable_relu2
+tb_top.dut.relu2_index[31:0]
+tb_top.dut.enable_flatten
+tb_top.dut.flat_valid_in
+tb_top.dut.flat_valid_out
+tb_top.dut.conv2_flat_index[31:0]
+tb_top.dut.start_dense
+tb_top.dut.enable_dense
+tb_top.dut.dense_feature_valid
+tb_top.dut.dense_feature_pixel[19:0]
+tb_top.dut.flat_dense_index[31:0]
+tb_top.dut.u_dense_layer.active
+tb_top.dut.u_dense_layer.index[31:0]
+tb_top.dut.dense_done
+tb_top.dut.winning_digit[3:0]
+tb_top.predicted_digit[3:0]
+tb_top.dut.done
