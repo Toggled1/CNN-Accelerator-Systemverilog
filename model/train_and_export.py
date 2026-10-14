@@ -1,3 +1,12 @@
+"""
+    trains on MNIST training set of 60k images
+
+    after 5 epochs with batchsize of 64 and leraning rate of 0.001, weights and biases are written to the test_vectors folder
+
+    from test set of 10k images, exports a test subset of 100 images (first 10 images for each class in digit-major ordering)
+
+    compares MNIST test labels to golden refernce model outputs 
+"""
 import random
 from pathlib import Path
 
@@ -43,7 +52,7 @@ def select_test_subset() -> tuple[np.ndarray, np.ndarray]:
 
     # np.flatnonzero find first 10 test imgaes of digit d
     idx = np.concatenate([np.flatnonzero(labels == d)[:10] for d in range(10)])
-    return images[idx], labels[idx]
+    return images[idx], labels[idx] #returns a slice of the total image and label sets, covering the indexex satisfied by the line above 
 
 
 def main() -> None:
@@ -105,10 +114,12 @@ def main() -> None:
     u_CNN.eval()
 
     params = quantize_model(u_CNN) #converts training float weights and biases to integers
+
+    # 100 test images!
     images, labels = select_test_subset() #First 10 test images of each digit, in digit-major order (raw uint8 pixels).
 
-    # golden = np.array([predict(img, params) for img in images]) #predict from int refernce model
-    # correct = int((golden == labels).sum())
+    golden = np.array([predict(img, params) for img in images]) #predict from int refernce model
+    correct = int((golden == labels).sum())
 
 
     # exports
@@ -128,12 +139,12 @@ def main() -> None:
 
     write_mem(OUT_DIR / "input_images.mem", images, 2, 100 * 784)
 
-    # write_mem(OUT_DIR / "golden_outputs.mem", golden, 1, 100)
+    write_mem(OUT_DIR / "golden_outputs.mem", golden, 1, 100)
     write_mem(OUT_DIR / "labels.mem", labels, 1, 100)
 
-    # print(f"The integer-reference accuracy on 100-image subset is: {correct}/100")
-    # if correct < 90:
-    #     print("Not GOOD!!!: below the 90/100 project goal")
+    print(f"The integer-reference accuracy on 100-image subset is: {correct}/100")
+    if correct < 90:
+        print("Not GOOD!!!: below the 90/100 project goal")
 
 
 
