@@ -69,12 +69,12 @@ control_fsm u_control_fsm (
 
 -----------------------------------------------------------------*/
 
-logic signed [7:0] conv1_weights [0:3][0:8];
-logic signed [19:0] conv1_biases [0:3];
-logic signed [7:0] conv2_weights [0:7][0:35];
-logic signed [19:0] conv2_biases [0:7];
-logic signed [7:0] dense_weights [0:9][0:967];
-logic signed [19:0] dense_biases [0:9];
+wire signed [7:0] conv1_weights [0:3][0:8];
+wire signed [19:0] conv1_biases [0:3];
+wire signed [7:0] conv2_weights [0:7][0:35];
+wire signed [19:0] conv2_biases [0:7];
+wire signed [7:0] dense_weights [0:9][0:967];
+wire signed [19:0] dense_biases [0:9];
 
 
 weights_mem u_weights_mem(
@@ -142,7 +142,7 @@ end
 logic [7:0] line_buffer_pixel_in;
 logic line_buffer_pixel_valid;
 logic window_conv1_valid;
-logic signed [7:0] window_conv1 [0:8];
+wire signed [7:0] window_conv1 [0:8];
 int image_read_index;
 int image_read_row;
 int image_read_col;
@@ -199,7 +199,7 @@ line_buffer u_line_buffer(
 
 // Feature map signals
 logic signed [19:0] conv1_feature_map_buffer [0:25] [0:25] [0:3]; //[row][col][channel]
-logic signed [19:0] conv1_feature_map_item [0:3]; // Output of the conv1 layer for each channel
+wire signed [19:0] conv1_feature_map_item [0:3]; // Output of the conv1 layer for each channel
 int conv1_output_index;
 int conv1_output_row;
 int conv1_output_col;
@@ -220,7 +220,7 @@ always_comb begin
     relu1_col = relu1_index % 26;
 end
 
-logic signed [19:0] relu1_out [0:3];
+wire signed [19:0] relu1_out [0:3];
 
 
 
@@ -435,7 +435,7 @@ pooling_layer u_pooling_layer (
 
 
 logic signed [19:0] conv2_feature_map_buffer [0:10] [0:10] [0:7]; //[row][col][channel]: 11x11x8
-logic signed [19:0] conv2_feature_map_item [0:7]; // Output of the conv1 layer for each channel
+wire signed [19:0] conv2_feature_map_item [0:7]; // Output of the conv2 layer for each channel
 int conv2_output_index;
 int conv2_output_row;
 int conv2_output_col;
@@ -457,7 +457,7 @@ always_comb begin
     relu2_col = relu2_index % 11;
 end
 
-logic signed [19:0] relu2_out [0:7];
+wire signed [19:0] relu2_out [0:7];
 
 
 
@@ -592,7 +592,7 @@ end
 
 -----------------------------------------------------*/
 
-logic signed [19:0] flattened_vector [0:967];
+wire signed [19:0] flattened_vector [0:967];
 logic flat_valid_in;
 logic flat_valid_out;
 logic signed [19:0] flat_data_in [0:7];
@@ -668,7 +668,7 @@ Dense Layer
 -----------------------------------------------------*/
 
 
-logic signed [19:0] logits [0:9];
+wire signed [19:0] logits [0:9];
 logic dense_feature_valid;
 logic signed [19:0] dense_feature_pixel; //there are 968 flattened feature pixels (11*11*8)
 
