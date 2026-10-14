@@ -1,5 +1,4 @@
-# Minimal compile/run/wave workflow for the MNIST CNN RTL simulation.
-# The design is intentionally still a smoke-test placeholder for Phase 1.
+# Compile, unit-test, and run the end-to-end MNIST CNN RTL simulation.
 
 IVERILOG = iverilog
 VVP = vvp
@@ -21,21 +20,27 @@ RTL_SRC = \
 TB_SRC = ../tb/tb_top.sv
 SIM_OUT = cnn_tb.out
 VCD_OUT = cnn_smoke.vcd
-UNIT_TESTS = argmax conv_layer_1 conv_layer_2 dense_layer flatten_layer pooling_layer weights_mem
+RUN_ARGS ?=
+UNIT_TESTS = argmax control_fsm conv_layer_1 conv_layer_2 dense_layer flatten_layer line_buffer pooling_layer relu weights_mem
 
-.PHONY: compile run wave unit-test clean
+.PHONY: all test compile run wave unit-test clean
+
+all: test
+
+test: unit-test run
 
 compile: $(SIM_OUT)
 
-$(SIM_OUT): $(RTL_SRC) $(TB_SRC)
-	@echo "Compiling CNN RTL smoke test..."
+$(SIM_OUT): $(RTL_SRC) $(TB_SRC) Makefile
+	@echo "Compiling CNN RTL integration test..."
 	$(IVERILOG) -g2012 -Wall -Wno-timescale -s tb_top -o $(SIM_OUT) $(RTL_SRC) $(TB_SRC)
 
 run: compile
-	@echo "Running CNN RTL smoke test..."
-	$(VVP) $(SIM_OUT)
+	@echo "Running end-to-end CNN RTL regression..."
+	$(VVP) $(SIM_OUT) $(RUN_ARGS)
 
-wave: run
+wave: compile
+	$(VVP) $(SIM_OUT) +images=1 +start=0 +dump
 	@echo "Launching GTKWave..."
 	$(GTKWAVE) $(VCD_OUT) wave_config.gtkw
 
