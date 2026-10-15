@@ -132,9 +132,9 @@ After training, `quantize_model` in `model/export_utils.py` converts the weights
 
 `model/int_reference_model.py` is a _bit-accurate integer refernce model_ of the RTL arithmetic, written with NumPy on `int64` values. `predict(image, params)` takes one raw 28 x 28 image and the quantized parameters, and follows the RTL stage by stage: the `pixel >> 1` conversion, Conv1, saturation, ReLU, 2 x 2 max pooling, Conv2 with its bias alignment and right shift, saturation, ReLU, channel-major flatten, Dense, and argmax. It builds the 3 x 3 windows with `sliding_window_view` from numpy library and does the multiply-accumulates with `einsum`.
 
-`train_and_export.py` runs `predict` on the 100 test images using the same quantized parameters it exports, and writes the resulting digits to `golden_outputs.mem`. 
+`train_and_export.py` runs the integer reference model on the 100 test images using the same quantized parameters it exports, then writes the expected digits to `golden_outputs.mem` and all ten class logits per image to `golden_logits.mem`.
 
-`tb/tb_top.sv` loads `input_images.mem`, `golden_outputs.mem`, and `labels.mem`, streams each image into `top_classifier` through the `ready` / `pixel_valid` handshake, waits for `done`, and compares the RTL's `predicted_digit` with the golden digit. Any difference is counted as a mismatch and fails the simulation. The testbench also compares each digit with its MNIST label, prints the accuracy as `correct/100`, and, on the full 100-image run, fails if fewer than 90 are correct. At the top level only the predicted digit is compared; the module-level testbenches in `tb/` cover the individual modules (`make -C sim unit-test`).
+`tb/tb_top.sv` loads those reference outputs along with `input_images.mem` and `labels.mem`, streams each image into `top_classifier` through the `ready` / `pixel_valid` handshake, and waits for `done`. It compares the RTL's predicted digit and each of its ten logits against the reference values; any mismatch fails the simulation. The testbench also compares each predicted digit with its MNIST label, reports accuracy, and, on the full 100-image run, fails if fewer than 90 are correct. The module-level testbenches in `tb/` cover the individual modules (`make -C sim unit-test`).
 
 ## Run the Simulation
 
