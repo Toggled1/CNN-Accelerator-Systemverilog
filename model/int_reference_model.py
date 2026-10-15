@@ -8,8 +8,7 @@ from numpy.lib.stride_tricks import sliding_window_view as swv
 
 
 
-
-def predict(image, params) -> int: 
+def logits (image, params) -> np.ndarray: 
 
 
     """ Window Generation and Conv1 Stage """
@@ -75,5 +74,10 @@ def predict(image, params) -> int:
     # saturation!
     logit = np.clip(logit, -(1 << 19), (1 << 19) - 1)
 
+    return logit
 
-    return int(np.argmax(logit))
+
+
+
+def predict(image, params) -> int:
+    return int(np.argmax(logits(image, params)))
