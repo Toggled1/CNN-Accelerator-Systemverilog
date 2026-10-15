@@ -20,7 +20,7 @@ from torchvision import datasets
 
 from export_utils import quantize_model, write_mem
 from float_training_model import CNN, rtl_input_scaling
-from int_reference_model import predict
+from int_reference_model import predict, logits
 
 SEED = 2026
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -121,6 +121,9 @@ def main() -> None:
     golden = np.array([predict(img, params) for img in images]) #predict from int refernce model
     correct = int((golden == labels).sum())
 
+    # Capture golden logits too
+    golden_logits = np.array([logits(img, params) for img in images]) #logits from int reference model
+
 
     # exports
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -140,6 +143,7 @@ def main() -> None:
     write_mem(OUT_DIR / "input_images.mem", images, 2, 100 * 784)
 
     write_mem(OUT_DIR / "golden_outputs.mem", golden, 1, 100)
+    write_mem(OUT_DIR / "golden_logits.mem", golden_logits, 5, 100 * 10) #logit is signed 20-bit, so 5 hex digits
     write_mem(OUT_DIR / "labels.mem", labels, 1, 100)
 
     print(f"The integer-reference accuracy on 100-image subset is: {correct}/100")
