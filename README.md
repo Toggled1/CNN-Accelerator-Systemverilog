@@ -23,7 +23,6 @@ This is a convolutional neural network in SystemVerilog using fixed-point arithm
 - [Verification](#verification)
 - [Run the Simulation](#run-the-simulation)
 - [Repository Guide](#repository-guide)
-- [Next Steps](#next-steps)
 
 ## Project Overview
 
@@ -170,8 +169,3 @@ The full regression compares RTL predictions with the committed golden outputs a
 | `tb/test_vectors/` | Generated/created weights, images, reference predictions, and labels |
 | `sim/` | Icarus compile/run workflow and waveform configuration |
 | `README.md` | Project and simulation guide |
-
-## Next Steps
-
-1. Extend the top-level regression to compare all ten RTL logits against the integer reference.
-2. Add broader end-to-end corner cases and run the simulation suite in CI.
