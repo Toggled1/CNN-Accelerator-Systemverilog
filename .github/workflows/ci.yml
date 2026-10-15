@@ -17,15 +17,5 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y iverilog
 
-      - name: Invoke current compile target (scaffold)
-        run: |
-          cd sim
-          make compile
-
-      - name: Invoke current run target (scaffold)
-        run: |
-          cd sim
-          make run
-
-      - name: Report scaffold status
-        run: echo "Workflow commands returned; functional RTL/reference and accuracy checks remain TODO."
+      - name: Run unit tests and 100-image RTL regression
+        run: make -C sim test
