@@ -3,7 +3,7 @@
 This is a convolutional neural network in SystemVerilog using fixed-point arithmetic and verified in simulation. Notably, this design is built for the MNIST dataset.
 
 
-![MNIST CNN network diagram](assets/network_gridlines.png)
+![MNIST CNN network diagram](assets/network_gridlines_solid.png)
 
 **Conv1 -> ReLU1 -> MaxPool -> Conv2 -> ReLU2 -> Flatten -> Dense -> Argmax**
 
