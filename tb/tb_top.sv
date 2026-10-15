@@ -15,11 +15,13 @@ module tb_top;
 
     logic [7:0] image_mem [0:IMAGE_COUNT * IMAGE_PIXELS - 1];
     logic [3:0] golden_mem [0:IMAGE_COUNT - 1];
+    logic signed [19:0] golden_logits [0:IMAGE_COUNT * 10 - 1];
     logic [3:0] label_mem [0:IMAGE_COUNT - 1];
     integer image_start;
     integer image_limit;
     integer correct_count;
     integer mismatch_count;
+    integer logit_mismatch_count;
     logic [3:0] result;
 
     top_classifier dut (
@@ -83,6 +85,7 @@ module tb_top;
         image_start = 0;
         correct_count = 0;
         mismatch_count = 0;
+        logit_mismatch_count = 0;
         image_limit = IMAGE_COUNT;
 
         if ($value$plusargs("start=%d", image_start)) begin
@@ -98,10 +101,12 @@ module tb_top;
 
         $readmemh("../tb/test_vectors/input_images.mem", image_mem);
         $readmemh("../tb/test_vectors/golden_outputs.mem", golden_mem);
+        $readmemh("../tb/test_vectors/golden_logits.mem", golden_logits);
         $readmemh("../tb/test_vectors/labels.mem", label_mem);
 
         if ((^image_mem[IMAGE_COUNT * IMAGE_PIXELS - 1] === 1'bx) ||
             (^golden_mem[IMAGE_COUNT - 1] === 1'bx) ||
+            (^golden_logits[IMAGE_COUNT * 10 - 1] === 1'bx) ||
             (^label_mem[IMAGE_COUNT - 1] === 1'bx)) begin
             $fatal(1, "FAIL: test-vector files are missing values or contain unknowns");
         end
@@ -127,12 +132,22 @@ module tb_top;
             if (result === label_mem[image_index]) begin
                 correct_count = correct_count + 1;
             end
+
+            // dut.logits stays stable from dense_done until the next inference.
+            for (integer k = 0; k < 10; k = k + 1) begin
+                if (dut.logits[k] !== golden_logits[image_index * 10 + k]) begin
+                    logit_mismatch_count = logit_mismatch_count + 1;
+                    $display("LOGIT MISMATCH: image %0d class %0d expected %0d, got %0d",
+                           image_index, k, golden_logits[image_index * 10 + k], dut.logits[k]);
+                end
+            end
         end
 
         $display("RTL reference mismatches: %0d/%0d", mismatch_count, image_limit);
+        $display("RTL logit mismatches: %0d/%0d", logit_mismatch_count, image_limit * 10);
         $display("MNIST accuracy: %0d/%0d", correct_count, image_limit);
-        if (mismatch_count != 0) begin
-            $fatal(1, "FAIL: RTL predictions differ from the integer reference");
+        if (mismatch_count != 0 || logit_mismatch_count != 0) begin
+            $fatal(1, "FAIL: RTL predictions or logits differ from the integer reference");
         end
         $display("PASS: RTL matched all %0d reference predictions.", image_limit);
         if (image_start == 0 && image_limit == IMAGE_COUNT && correct_count < 90) begin
