@@ -4,6 +4,7 @@ This is a convolutional neural network in SystemVerilog using fixed-point arithm
 
 
 ![MNIST CNN network diagram](assets/network_gridlines.png)
+
 **Conv1 -> ReLU1 -> MaxPool -> Conv2 -> ReLU2 -> Flatten -> Dense -> Argmax**
 
 ## Contents
@@ -18,6 +19,8 @@ This is a convolutional neural network in SystemVerilog using fixed-point arithm
 	- [Products and Accumulation](#products-and-accumulation)
 	- [Quantization](#quantization)
 	- [Exported Parameters](#exported-parameters)
+- [Training and Export](#training-and-export)
+- [Verification](#verification)
 - [Run the Simulation](#run-the-simulation)
 - [Repository Guide](#repository-guide)
 - [Next Steps](#next-steps)
@@ -113,6 +116,26 @@ The export contains 10,026 parameters:
 | Dense weights and biases | 9,680 weights + 10 biases |
 
 Weights are signed 8-bit two's-complement values (two hex digits per value); biases are signed 20-bit values (five digits). The files are `conv1_weights.mem`, `conv2_weights.mem`, `dense_weights.mem`, and `biases.mem`; biases are ordered Conv1, Conv2, then Dense.
+
+## Training and Export
+
+I created a training model with float arithmetic in PyTorch. `model/float_training_model.py` defines the `CNN` class with the same network as the RTL (Conv1, ReLU, 2x2 max pool, Conv2, ReLU, flatten, dense). `model/train_and_export.py` trains it on the 60,000-image MNIST training split:
+
+- **Input scaling:** each pixel becomes `floor(pixel / 2) / 128`, the floating-point form of the RTL's Q1.7 conversion (the rtl and int-refernce model keep it at the integer fixed point range instead)
+- **Training setup:** 5 epochs, batch size 64, Adam with a learning rate of 0.001, and cross-entropy loss, on the CPU. The Python, NumPy, and PyTorch seeds are 2026 (so creative I know), the shuffled data loader is seeded, and PyTorch deterministic algorithms are enabled.
+- **Hardware ranges:** after every optimizer step, weights are clamped to [-1, 127/128] and biases to [-32, 32 - 2^-14], the real-value ranges of Q1.7 and Q6.14. Training therefore never produces a value the hardware cannot store.
+
+Training runs entirely in floating point!
+
+After training, `quantize_model` in `model/export_utils.py` converts the weights and biases to integers as described under Quantization, and `write_mem` writes them as hex `.mem` files in `tb/test_vectors/`, checking that each file has the expected number of values. The script also takes the first 10 images of each digit from the 10,000-image MNIST test split, 100 in total in digit-major order, and writes them as raw unsigned pixels to `input_images.mem`, with their truth labels in `labels.mem`.
+
+## Verification
+
+`model/int_reference_model.py` is a _bit-accurate integer refernce model_ of the RTL arithmetic, written with NumPy on `int64` values. `predict(image, params)` takes one raw 28 x 28 image and the quantized parameters, and follows the RTL stage by stage: the `pixel >> 1` conversion, Conv1, saturation, ReLU, 2 x 2 max pooling, Conv2 with its bias alignment and right shift, saturation, ReLU, channel-major flatten, Dense, and argmax. It builds the 3 x 3 windows with `sliding_window_view` from numpy library and does the multiply-accumulates with `einsum`.
+
+`train_and_export.py` runs `predict` on the 100 test images using the same quantized parameters it exports, and writes the resulting digits to `golden_outputs.mem`. 
+
+`tb/tb_top.sv` loads `input_images.mem`, `golden_outputs.mem`, and `labels.mem`, streams each image into `top_classifier` through the `ready` / `pixel_valid` handshake, waits for `done`, and compares the RTL's `predicted_digit` with the golden digit. Any difference is counted as a mismatch and fails the simulation. The testbench also compares each digit with its MNIST label, prints the accuracy as `correct/100`, and, on the full 100-image run, fails if fewer than 90 are correct. At the top level only the predicted digit is compared; the module-level testbenches in `tb/` cover the individual modules (`make -C sim unit-test`).
 
 ## Run the Simulation
 
