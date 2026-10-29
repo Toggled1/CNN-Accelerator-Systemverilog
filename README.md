@@ -9,6 +9,8 @@ This is a convolutional neural network in SystemVerilog using fixed-point arithm
 > * **Establish fixed-point arithmetic** and validate its behaviour.
 > * **Verify CNN feasibility** before investing in a fully pipelined architecture.
 > * **Develop a reference model and verification framework** that can be integrated into the development of the pipelined version for continuous testing and verification.
+
+
 ![MNIST CNN network diagram](assets/network_gridlines_solid.png)
 
 **Conv1 -> ReLU1 -> MaxPool -> Conv2 -> ReLU2 -> Flatten -> Dense -> Argmax**
