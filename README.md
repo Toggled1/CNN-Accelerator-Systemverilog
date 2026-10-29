@@ -2,7 +2,7 @@
 
 This is a convolutional neural network in SystemVerilog using fixed-point arithmetic and verified in simulation. Notably, this design is built for the MNIST dataset.
 
-> **Note:** This project serves as a foundational predecessor to a fully pipelined, streaming CNN targeted for the Artix-7 FPGA which I have been working on :D 
+> **Note:** This project serves as a foundational predecessor to a fully pipelined, streaming CNN targeted for the Artix-7 FPGA which I have been working on :D  (Private repo at the moment)
 > 
 > While this version relies on FSM-based sequencing and buffering rather than a full streaming pipeline, it is a complete and fully functional design in its own right (though not deployed to the FPGA). Its primary objectives were to:
 > 
